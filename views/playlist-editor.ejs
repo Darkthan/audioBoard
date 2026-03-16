@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= playlist.name %> - AudioBoard</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <%- include('partials/navbar') %>
+
+  <div class="container" style="max-width:860px; padding-bottom:100px;">
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <!-- Header playlist -->
+    <div class="playlist-editor-header">
+      <a href="/" class="back-link">‹ Retour</a>
+      <div class="playlist-title-row">
+        <h1 id="playlistTitle"><%= playlist.name %></h1>
+        <button class="copy-btn" id="renameToggle">Renommer</button>
+      </div>
+      <form method="POST" action="/playlists/<%= playlist.id %>/rename" id="renameForm" style="display:none; margin-top:0.5rem;">
+        <div style="display:flex; gap:0.5rem;">
+          <input type="text" name="name" class="form-control" value="<%= playlist.name %>" required style="max-width:300px;">
+          <button type="submit" class="btn btn-primary btn-sm">OK</button>
+          <button type="button" class="btn btn-sm" id="renameCancel" style="background:var(--surface-hover);">Annuler</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Lien public -->
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-title">Lien public</div>
+      <% if (playlist.share_token) { %>
+        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+          <code class="share-url">/playlist/<%= playlist.share_token %></code>
+          <button class="copy-btn" onclick="copyShare()">Copier</button>
+          <form method="POST" action="/playlists/<%= playlist.id %>/revoke" style="display:inline;">
+            <button type="submit" class="copy-btn" style="color:var(--warning);">Révoquer</button>
+          </form>
+        </div>
+      <% } else { %>
+        <form method="POST" action="/playlists/<%= playlist.id %>/share">
+          <button type="submit" class="btn btn-primary btn-sm">Générer un lien public</button>
+        </form>
+      <% } %>
+    </div>
+
+    <!-- Upload -->
+    <div class="card upload-card" style="margin-bottom:1.5rem;">
+      <div class="card-title">Ajouter des pistes</div>
+      <form id="uploadForm" method="POST" action="/upload" enctype="multipart/form-data">
+        <input type="hidden" name="playlist_id" value="<%= playlist.id %>">
+        <div class="upload-zone" id="uploadZone" tabindex="0" role="button">
+          <input type="file" id="audioInput" name="audio" accept="audio/*" class="upload-input" multiple>
+          <div class="upload-zone-content">
+            <div class="upload-kicker">Glisser-déposer</div>
+            <div class="upload-headline">Déposez vos fichiers ici ou cliquez pour en choisir</div>
+            <p>MP3, WAV, FLAC, AAC, M4A, OGG, WMA, WEBM · 200 Mo max par fichier</p>
+            <div class="upload-selection" id="uploadSelection">
+              <div class="upload-selection-header">
+                <span id="fileCount">Aucun fichier sélectionné</span>
+                <button type="button" class="copy-btn" id="clearFilesBtn" hidden>Vider</button>
+              </div>
+              <div class="upload-file-list" id="fileList"></div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:0.75rem;">
+          <button type="submit" class="btn btn-primary" id="uploadSubmitBtn" disabled>Envoyer</button>
+        </div>
+        <div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
+      </form>
+    </div>
+
+    <!-- Liste des pistes -->
+    <div class="card">
+      <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>Pistes <span class="text-muted text-sm">(<%= files.length %>)</span></span>
+        <% if (files.length > 1) { %>
+          <button class="btn btn-primary btn-sm" id="saveOrderBtn" disabled>Sauvegarder l'ordre</button>
+        <% } %>
+      </div>
+
+      <% if (!files.length) { %>
+        <p class="text-muted">Aucune piste. Ajoutez des fichiers audio ci-dessus.</p>
+      <% } else { %>
+        <ul class="track-list" id="trackList">
+          <% files.forEach((f, idx) => { %>
+            <li class="track-item" data-id="<%= f.id %>" data-sc-token="<%= f.share_token %>">
+              <span class="drag-handle" title="Déplacer">⠿</span>
+              <button class="track-play-inline" onclick="scPlay('<%= f.share_token %>')" title="Écouter">
+                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+              <span class="track-num"><%= idx + 1 %></span>
+              <div class="track-info">
+                <span class="track-name"><%= f.original_name %></span>
+                <span class="track-meta">
+                  <%= (f.size/1048576).toFixed(1) %> Mo
+                  <% if (f.compressed) { %> · <span class="badge badge-compressed">MP3</span><% } %>
+                  <% if (f.expires_at) { %> · Expire le <%= new Date(f.expires_at).toLocaleDateString('fr-FR') %><% } %>
+                </span>
+              </div>
+              <div class="track-actions">
+                <button class="copy-btn" onclick="copyTrackLink('<%= f.share_token %>')">Copier le lien</button>
+                <form method="POST" action="/files/<%= f.id %>/delete" style="display:inline;"
+                      onsubmit="return confirm('Supprimer cette piste ?')">
+                  <button type="submit" class="btn btn-danger btn-sm">Suppr.</button>
+                </form>
+              </div>
+            </li>
+          <% }) %>
+        </ul>
+      <% } %>
+    </div>
+
+    <!-- Supprimer la playlist -->
+    <div style="text-align:right; margin-top:0.5rem; margin-bottom:2rem;">
+      <form method="POST" action="/playlists/<%= playlist.id %>/delete"
+            onsubmit="return confirm('Supprimer la playlist « <%= playlist.name %> » et toutes ses pistes ?')">
+        <button type="submit" class="btn btn-danger btn-sm">Supprimer la playlist</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Player -->
+  <%- include('partials/audio-player') %>
+
+  <script>
+    // ── Register tracks for the player ───────────────────────────────────────
+    scRegisterTracks([
+      <% files.forEach((f, i) => { %>
+        { token: '<%= f.share_token %>', name: '<%= f.original_name.replace(/'/g, "\\'") %>', playlistName: '<%= playlist.name.replace(/'/g, "\\'") %>' }<%= i < files.length - 1 ? ',' : '' %>
+      <% }) %>
+    ]);
+
+    // ── Rename toggle ─────────────────────────────────────────────────────────
+    document.getElementById('renameToggle').addEventListener('click', () => {
+      document.getElementById('renameForm').style.display = 'block';
+      document.getElementById('renameToggle').style.display = 'none';
+    });
+    document.getElementById('renameCancel').addEventListener('click', () => {
+      document.getElementById('renameForm').style.display = 'none';
+      document.getElementById('renameToggle').style.display = '';
+    });
+
+    // ── Copy links ────────────────────────────────────────────────────────────
+    function copyShare() {
+      navigator.clipboard.writeText(location.origin + '/playlist/<%= playlist.share_token %>').then(() => alert('Lien copié !'));
+    }
+    function copyTrackLink(token) {
+      navigator.clipboard.writeText(location.origin + '/listen/' + token).then(() => alert('Lien copié !'));
+    }
+
+    // ── Upload zone ───────────────────────────────────────────────────────────
+    const form       = document.getElementById('uploadForm');
+    const fileInput  = document.getElementById('audioInput');
+    const uploadZone = document.getElementById('uploadZone');
+    const fileList   = document.getElementById('fileList');
+    const fileCount  = document.getElementById('fileCount');
+    const clearBtn   = document.getElementById('clearFilesBtn');
+    const submitBtn  = document.getElementById('uploadSubmitBtn');
+    let selectedFiles = [], dragDepth = 0;
+
+    document.addEventListener('dragover', e => e.preventDefault());
+    document.addEventListener('drop', e => { if (!uploadZone.contains(e.target)) e.preventDefault(); });
+
+    function fmtSize(b) { return b < 1048576 ? (b/1024).toFixed(0)+' Ko' : (b/1048576).toFixed(1)+' Mo'; }
+
+    function renderFiles() {
+      fileList.innerHTML = selectedFiles.map((f, i) => `
+        <div class="upload-file-item">
+          <div><strong>${f.name}</strong><span>${fmtSize(f.size)}</span></div>
+          <button type="button" class="copy-btn" data-i="${i}">Retirer</button>
+        </div>`).join('');
+      if (!selectedFiles.length) {
+        fileCount.textContent = 'Aucun fichier sélectionné';
+        clearBtn.hidden = true; submitBtn.disabled = true; return;
+      }
+      const total = selectedFiles.reduce((s, f) => s + f.size, 0);
+      const n = selectedFiles.length;
+      fileCount.textContent = `${n} fichier${n>1?'s':''} · ${fmtSize(total)}`;
+      clearBtn.hidden = false; submitBtn.disabled = false;
+    }
+
+    function addFiles(list) { selectedFiles = selectedFiles.concat(Array.from(list)); renderFiles(); }
+
+    fileInput.addEventListener('change', () => { if (fileInput.files.length) addFiles(fileInput.files); fileInput.value = ''; });
+    uploadZone.addEventListener('click', e => { if (!e.target.closest('button')) fileInput.click(); });
+    uploadZone.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); fileInput.click(); } });
+    uploadZone.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; uploadZone.classList.add('dragover'); });
+    uploadZone.addEventListener('dragover',  e => { e.preventDefault(); });
+    uploadZone.addEventListener('dragleave', () => { if (--dragDepth === 0) uploadZone.classList.remove('dragover'); });
+    uploadZone.addEventListener('drop', e => {
+      e.preventDefault(); dragDepth = 0; uploadZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+    });
+    clearBtn.addEventListener('click', () => { selectedFiles = []; renderFiles(); });
+    fileList.addEventListener('click', e => {
+      const btn = e.target.closest('[data-i]');
+      if (btn) { selectedFiles.splice(Number(btn.dataset.i), 1); renderFiles(); }
+    });
+    renderFiles();
+
+    form.addEventListener('submit', function(e) {
+      if (!selectedFiles.length) return;
+      e.preventDefault();
+      const fd = new FormData();
+      selectedFiles.forEach(f => fd.append('audio', f));
+      fd.append('playlist_id', '<%= playlist.id %>');
+      const bar = document.getElementById('progressBar'), fill = document.getElementById('progressFill');
+      bar.style.display = 'block'; submitBtn.disabled = true;
+      const xhr = new XMLHttpRequest();
+      xhr.upload.addEventListener('progress', e => { if (e.lengthComputable) fill.style.width = (e.loaded/e.total*100)+'%'; });
+      xhr.addEventListener('load', () => {
+        if (xhr.status < 400) { location.href = xhr.responseURL || '/playlists/<%= playlist.id %>'; return; }
+        alert("Erreur lors de l'upload (" + xhr.status + ')');
+        bar.style.display = 'none'; submitBtn.disabled = false;
+      });
+      xhr.addEventListener('error', () => { alert('Erreur réseau'); bar.style.display = 'none'; submitBtn.disabled = false; });
+      xhr.open('POST', '/upload'); xhr.send(fd);
+    });
+
+    // ── Drag & drop reorder ───────────────────────────────────────────────────
+    const trackList    = document.getElementById('trackList');
+    const saveOrderBtn = document.getElementById('saveOrderBtn');
+    if (trackList && saveOrderBtn) {
+      let dragged = null;
+
+      trackList.addEventListener('dragstart', e => {
+        const item = e.target.closest('.track-item');
+        if (!item) return;
+        dragged = item; item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      trackList.addEventListener('dragend', e => {
+        e.target.closest('.track-item')?.classList.remove('dragging');
+        trackList.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        dragged = null;
+      });
+      trackList.addEventListener('dragover', e => {
+        e.preventDefault();
+        const target = e.target.closest('.track-item');
+        if (!target || target === dragged) return;
+        trackList.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        target.classList.add('drag-over');
+      });
+      trackList.addEventListener('dragleave', e => { e.target.closest('.track-item')?.classList.remove('drag-over'); });
+      trackList.addEventListener('drop', e => {
+        e.preventDefault();
+        const target = e.target.closest('.track-item');
+        if (!target || target === dragged) return;
+        target.classList.remove('drag-over');
+        const items = [...trackList.children];
+        if (items.indexOf(dragged) < items.indexOf(target)) trackList.insertBefore(dragged, target.nextSibling);
+        else trackList.insertBefore(dragged, target);
+        trackList.querySelectorAll('.track-num').forEach((el, i) => el.textContent = i + 1);
+        saveOrderBtn.disabled = false;
+      });
+
+      trackList.querySelectorAll('.track-item').forEach(item => {
+        item.setAttribute('draggable', 'false');
+        const handle = item.querySelector('.drag-handle');
+        if (handle) {
+          handle.addEventListener('mousedown', () => item.setAttribute('draggable', 'true'));
+          handle.addEventListener('mouseup',   () => item.setAttribute('draggable', 'false'));
+        }
+      });
+
+      saveOrderBtn.addEventListener('click', async () => {
+        const order = [...trackList.children].map(el => Number(el.dataset.id));
+        saveOrderBtn.disabled = true;
+        try {
+          const res = await fetch('/playlists/<%= playlist.id %>/reorder', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order }),
+          });
+          if (!res.ok) throw new Error();
+        } catch { alert("Erreur lors de la sauvegarde de l'ordre."); saveOrderBtn.disabled = false; }
+      });
+    }
+  </script>
+</body>
+</html>

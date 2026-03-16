@@ -1,0 +1,12 @@
+<nav class="navbar">
+  <div class="navbar-brand"><span>Audio</span>Board</div>
+  <div class="navbar-links">
+    <a href="/">Fichiers</a>
+    <% if (user && user.role === 'admin') { %>
+      <a href="/admin">Administration</a>
+    <% } %>
+    <% if (user) { %>
+      <a href="/logout">Déconnexion (<%= user.username %>)</a>
+    <% } %>
+  </div>
+</nav>

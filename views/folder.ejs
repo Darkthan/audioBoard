@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title><%= folder.name %> - AudioBoard</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .file-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.875rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s;
+    }
+    .file-item:hover { border-color: var(--primary); }
+    .file-info { flex: 1; min-width: 0; }
+    .file-info .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .file-info .meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; }
+    .play-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.5rem 1rem;
+      background: var(--primary);
+      color: #fff;
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      font-weight: 500;
+      white-space: nowrap;
+      text-decoration: none;
+    }
+    .play-btn:hover { background: var(--primary-dark); text-decoration: none; }
+    .folder-section { margin-bottom: 1.5rem; }
+    .folder-section-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.375rem;
+      border-bottom: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <div class="container" style="max-width: 700px;">
+    <div style="padding-top: 2rem; margin-bottom: 1.5rem;">
+      <h1 style="font-size: 1.5rem; margin-bottom: 0.25rem;"><%= folder.name %></h1>
+      <p class="text-muted text-sm"><%= files.length %> fichier<%= files.length !== 1 ? 's' : '' %></p>
+    </div>
+
+    <% if (files.length === 0) { %>
+      <div class="card">
+        <p class="text-muted">Ce dossier ne contient aucun fichier audio.</p>
+      </div>
+    <% } else { %>
+      <%
+        // Group files by folder_name
+        const grouped = {};
+        files.forEach(f => {
+          if (!grouped[f.folder_name]) grouped[f.folder_name] = [];
+          grouped[f.folder_name].push(f);
+        });
+        const groupNames = Object.keys(grouped).sort();
+        const showFolderNames = groupNames.length > 1 || groupNames[0] !== folder.name;
+      %>
+
+      <% groupNames.forEach(groupName => { %>
+        <% if (showFolderNames) { %>
+          <div class="folder-section-title"><%= groupName %></div>
+        <% } %>
+        <div class="file-list" style="margin-bottom: 1.5rem;">
+          <% grouped[groupName].forEach(f => { %>
+            <div class="file-item">
+              <div class="file-info">
+                <div class="name"><%= f.original_name %></div>
+                <div class="meta">
+                  <%= (f.size / 1024 / 1024).toFixed(1) %> Mo
+                  <% if (f.compressed) { %>&nbsp;·&nbsp;<span class="badge badge-compressed">MP3</span><% } %>
+                </div>
+              </div>
+              <a href="/listen/<%= f.share_token %>" class="play-btn" target="_blank">Écouter</a>
+            </div>
+          <% }) %>
+        </div>
+      <% }) %>
+    <% } %>
+  </div>
+</body>
+</html>

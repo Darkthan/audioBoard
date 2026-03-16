@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Erreur - AudioBoard</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="listen-container">
+    <div class="listen-card">
+      <h2>Erreur</h2>
+      <p class="meta"><%= message %></p>
+      <% if (user) { %>
+        <a href="/" class="btn btn-primary" style="margin-top:1rem;">Retour</a>
+      <% } else { %>
+        <a href="/login" class="btn btn-primary" style="margin-top:1rem;">Se connecter</a>
+      <% } %>
+    </div>
+  </div>
+</body>
+</html>

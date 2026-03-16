@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title><%= playlist.name %></title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container" style="max-width:680px; padding-bottom:100px;">
+    <div style="padding-top:2.5rem; margin-bottom:1.5rem;">
+      <h1 style="font-size:1.5rem; margin-bottom:0.25rem;"><%= playlist.name %></h1>
+      <p class="text-muted text-sm"><%= files.length %> piste<%= files.length!==1?'s':'' %></p>
+    </div>
+
+    <% if (!files.length) { %>
+      <div class="card"><p class="text-muted">Cette playlist ne contient aucune piste audio.</p></div>
+    <% } else { %>
+      <ul class="track-list" id="trackList">
+        <% files.forEach((f, idx) => { %>
+          <li class="track-item track-item-public" data-sc-token="<%= f.share_token %>"
+              onclick="scPlay('<%= f.share_token %>')">
+            <button class="track-play-inline" tabindex="-1">
+              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <span class="track-num"><%= idx + 1 %></span>
+            <div class="track-info">
+              <span class="track-name"><%= f.original_name %></span>
+              <span class="track-meta">
+                <%= (f.size/1048576).toFixed(1) %> Mo
+                <% if (f.compressed) { %> · <span class="badge badge-compressed">MP3</span><% } %>
+              </span>
+            </div>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+  </div>
+
+  <%- include('partials/audio-player') %>
+
+  <script>
+    scRegisterTracks([
+      <% files.forEach((f, i) => { %>
+        { token: '<%= f.share_token %>', name: '<%= f.original_name.replace(/'/g, "\\'") %>', playlistName: '<%= playlist.name.replace(/'/g, "\\'") %>' }<%= i < files.length - 1 ? ',' : '' %>
+      <% }) %>
+    ]);
+
+    // Auto-play first track on load
+    <% if (files.length) { %>
+      scPlay('<%= files[0].share_token %>');
+    <% } %>
+  </script>
+</body>
+</html>

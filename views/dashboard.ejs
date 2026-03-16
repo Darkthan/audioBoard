@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AudioBoard</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <%- include('partials/navbar') %>
+
+  <div class="container">
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <div class="dashboard-header">
+      <h1>Mes playlists</h1>
+      <form method="POST" action="/playlists" class="new-playlist-form">
+        <input type="text" name="name" class="form-control" placeholder="Nom de la nouvelle playlist" required>
+        <button type="submit" class="btn btn-primary">Créer</button>
+      </form>
+    </div>
+
+    <% if (!playlists.length) { %>
+      <div class="empty-state">
+        <div class="empty-state-icon">🎵</div>
+        <p>Aucune playlist pour le moment.</p>
+        <p class="text-muted text-sm">Créez votre première playlist ci-dessus.</p>
+      </div>
+    <% } else { %>
+      <div class="playlist-grid">
+        <% playlists.forEach(p => { %>
+          <a href="/playlists/<%= p.id %>" class="playlist-card">
+            <div class="playlist-card-icon">♪</div>
+            <div class="playlist-card-body">
+              <div class="playlist-card-name"><%= p.name %></div>
+              <div class="playlist-card-meta">
+                <% if (p.owner_name) { %><span><%= p.owner_name %></span> &middot; <% } %>
+                <span><%= p.file_count %> piste<%= p.file_count !== 1 ? 's' : '' %></span>
+                <% if (p.share_token) { %> &middot; <span class="badge-shared">Partagé</span><% } %>
+              </div>
+            </div>
+            <div class="playlist-card-arrow">›</div>
+          </a>
+        <% }) %>
+      </div>
+    <% } %>
+  </div>
+</body>
+</html>

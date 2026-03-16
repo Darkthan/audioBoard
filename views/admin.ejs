@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AudioBoard - Administration</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <%- include('partials/navbar') %>
+
+  <div class="container">
+    <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-value"><%= stats.totalFiles %></div><div class="stat-label">Fichiers</div></div>
+      <div class="stat-card"><div class="stat-value"><%= (stats.totalSize/1048576).toFixed(1) %> Mo</div><div class="stat-label">Espace utilisé</div></div>
+      <div class="stat-card"><div class="stat-value"><%= stats.totalUsers %></div><div class="stat-label">Utilisateurs</div></div>
+      <div class="stat-card"><div class="stat-value"><%= stats.totalPlaylists %></div><div class="stat-label">Playlists</div></div>
+    </div>
+
+    <div class="admin-grid">
+      <!-- Paramètres -->
+      <div class="card">
+        <div class="card-title">Paramètres</div>
+        <form method="POST" action="/admin/settings">
+          <div class="form-group">
+            <label>
+              <input type="checkbox" name="compression_enabled" value="1" <%= settings.compression_enabled==='1'?'checked':'' %>>
+              Compresser les fichiers uploadés (MP3)
+            </label>
+          </div>
+          <div class="form-group">
+            <label for="compression_bitrate">Bitrate (kbps)</label>
+            <select name="compression_bitrate" id="compression_bitrate" class="form-control">
+              <% ['64','96','128','160','192','256','320'].forEach(b => { %>
+                <option value="<%= b %>" <%= settings.compression_bitrate===b?'selected':'' %>><%= b %> kbps</option>
+              <% }) %>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="retention_days">Conservation (jours)</label>
+            <input type="number" name="retention_days" id="retention_days" class="form-control"
+                   value="<%= settings.retention_days %>" min="1" max="3650">
+          </div>
+          <button type="submit" class="btn btn-primary">Sauvegarder</button>
+        </form>
+      </div>
+
+      <!-- Utilisateurs -->
+      <div class="card">
+        <div class="card-title">Utilisateurs</div>
+        <form method="POST" action="/admin/users" class="inline-form" style="margin-bottom:1rem;">
+          <div class="form-group">
+            <input type="text" name="username" class="form-control" placeholder="Nom d'utilisateur" required>
+          </div>
+          <div class="form-group">
+            <input type="password" name="password" class="form-control" placeholder="Mot de passe" required>
+          </div>
+          <div class="form-group">
+            <select name="role" class="form-control">
+              <option value="uploader">Uploader</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">Créer</button>
+        </form>
+        <table>
+          <thead><tr><th>Utilisateur</th><th>Rôle</th><th>Créé le</th><th></th></tr></thead>
+          <tbody>
+            <% users.forEach(u => { %>
+              <tr>
+                <td><%= u.username %></td>
+                <td><span class="badge badge-<%= u.role %>"><%= u.role %></span></td>
+                <td class="text-muted"><%= new Date(u.created_at).toLocaleDateString('fr-FR') %></td>
+                <td>
+                  <% if (u.id !== user.id) { %>
+                    <form method="POST" action="/admin/users/<%= u.id %>/delete" style="display:inline;"
+                          onsubmit="return confirm('Supprimer cet utilisateur et toutes ses playlists ?')">
+                      <button type="submit" class="btn btn-danger btn-sm">Suppr.</button>
+                    </form>
+                  <% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Toutes les playlists -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <div class="card-title">Toutes les playlists</div>
+        <% if (!playlists.length) { %>
+          <p class="text-muted">Aucune playlist créée.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Playlist</th><th>Propriétaire</th><th>Fichiers</th><th>Créée le</th><th>Lien public</th><th></th></tr></thead>
+              <tbody>
+                <% playlists.forEach(p => { %>
+                  <tr>
+                    <td><%= p.name %></td>
+                    <td class="text-muted"><%= p.owner_name %></td>
+                    <td class="text-muted"><%= p.file_count %></td>
+                    <td class="text-muted"><%= new Date(p.created_at).toLocaleDateString('fr-FR') %></td>
+                    <td>
+                      <% if (p.share_token) { %>
+                        <button class="copy-btn" onclick="copyPlaylistLink('<%= p.share_token %>')">Copier</button>
+                        <form method="POST" action="/playlists/<%= p.id %>/revoke" style="display:inline;">
+                          <button type="submit" class="copy-btn" style="color:var(--warning);">Révoquer</button>
+                        </form>
+                      <% } else { %>
+                        <form method="POST" action="/playlists/<%= p.id %>/share" style="display:inline;">
+                          <button type="submit" class="copy-btn" style="color:var(--primary);">Générer</button>
+                        </form>
+                      <% } %>
+                    </td>
+                    <td>
+                      <form method="POST" action="/admin/playlists/<%= p.id %>/delete" style="display:inline;"
+                            onsubmit="return confirm('Supprimer la playlist « <%= p.name %> » et tous ses fichiers ?')">
+                        <button type="submit" class="btn btn-danger btn-sm">Suppr.</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function copyPlaylistLink(token) {
+      navigator.clipboard.writeText(location.origin + '/playlist/' + token).then(() => alert('Lien copié !'));
+    }
+  </script>
+</body>
+</html>
