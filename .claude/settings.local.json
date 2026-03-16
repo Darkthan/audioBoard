@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(which ffmpeg:*)",
+      "Bash(node:*)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(git init:*)",
+      "Bash(python3:*)",
+      "Bash(taskkill:*)",
+      "Bash(sleep:*)",
+      "Bash(curl:*)"
+    ]
+  }
+}

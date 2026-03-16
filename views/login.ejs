@@ -15,20 +15,79 @@
       <% if (error) { %>
         <div class="alert alert-error"><%= error %></div>
       <% } %>
+      <% if (info) { %>
+        <div class="alert alert-info"><%= info %></div>
+      <% } %>
 
-      <form method="POST" action="/login">
-        <div class="form-group">
-          <label for="username">Nom d'utilisateur</label>
-          <input type="text" id="username" name="username" class="form-control" required autofocus>
+      <% if (locals.passwordlessEnabled) { %>
+        <!-- ── Formulaire magic link ─────────────────────────────────── -->
+        <form method="POST" action="/login/magic" id="formMagic">
+          <div class="form-group">
+            <label for="username">Nom d'utilisateur</label>
+            <input type="text" id="username" name="username" class="form-control" required autofocus>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">
+            Recevoir un lien de connexion
+          </button>
+        </form>
+
+        <div style="text-align:center; margin:1rem 0; color:var(--text-muted); font-size:.85rem;">
+          — ou —
         </div>
-        <div class="form-group">
-          <label for="password">Mot de passe</label>
-          <input type="password" id="password" name="password" class="form-control" required>
+
+        <!-- ── Toggle mot de passe ───────────────────────────────────── -->
+        <div id="passwordSection" style="display:none;">
+          <form method="POST" action="/login">
+            <div class="form-group">
+              <label for="username2">Nom d'utilisateur</label>
+              <input type="text" id="username2" name="username" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label for="password">Mot de passe</label>
+              <input type="password" id="password" name="password" class="form-control" required autofocus>
+            </div>
+            <button type="submit" class="btn btn-secondary" style="width:100%; justify-content:center;">
+              Se connecter avec un mot de passe
+            </button>
+          </form>
         </div>
-        <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; margin-top:0.5rem;">
-          Se connecter
+
+        <button type="button" id="togglePassword" onclick="togglePasswordForm()"
+                style="background:none; border:none; color:var(--primary); cursor:pointer; width:100%; margin-top:.5rem; font-size:.875rem; text-decoration:underline;">
+          Se connecter avec un mot de passe
         </button>
-      </form>
+
+        <script>
+          function togglePasswordForm() {
+            const sec = document.getElementById('passwordSection');
+            const btn = document.getElementById('togglePassword');
+            const open = sec.style.display === 'none';
+            sec.style.display = open ? '' : 'none';
+            btn.textContent = open ? 'Annuler' : 'Se connecter avec un mot de passe';
+            if (open) {
+              // Sync username
+              const u = document.getElementById('username').value;
+              if (u) document.getElementById('username2').value = u;
+              document.getElementById('password').focus();
+            }
+          }
+        </script>
+      <% } else { %>
+        <!-- ── Formulaire mot de passe classique ─────────────────────── -->
+        <form method="POST" action="/login">
+          <div class="form-group">
+            <label for="username">Nom d'utilisateur</label>
+            <input type="text" id="username" name="username" class="form-control" required autofocus>
+          </div>
+          <div class="form-group">
+            <label for="password">Mot de passe</label>
+            <input type="password" id="password" name="password" class="form-control" required>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; margin-top:0.5rem;">
+            Se connecter
+          </button>
+        </form>
+      <% } %>
     </div>
   </div>
 </body>

@@ -1,3 +1,5 @@
+<script>window.AB_WEBRTC = <%= locals.webrtcEnabled !== false ? 'true' : 'false' %>;</script>
+<script src="/js/p2p-audio.js"></script>
 <!-- ── Sticky bottom player (SoundCloud-style) ──────────────────────────── -->
 <div class="sc-player" id="scPlayer">
   <audio id="scAudio" preload="auto"></audio>
@@ -215,14 +217,14 @@
         );
       }
 
-      audio.src = '/stream/' + state.token;
-      audio.load();
       player.classList.add('sc-visible');
 
       audio.addEventListener('canplay', () => {
         audio.currentTime = state.currentTime || 0;
         if (state.playing) audio.play().catch(() => {});
       }, { once: true });
+
+      P2PAudio.load(state.token, audio);
     } catch {}
   }
 
@@ -296,15 +298,14 @@
       el.classList.toggle('sc-active', el.dataset.scToken === currentTrack.token)
     );
 
-    // Load audio
-    audio.src = '/stream/' + currentTrack.token;
-    audio.load();
+    // Load audio (P2P si dispo, sinon HTTP direct)
     timeDur.textContent = fsTimeDur.textContent = '—';
     timeCur.textContent = fsTimeCur.textContent = '0:00';
     miniFill.style.width = '0%';
     player.classList.add('sc-visible');
-
-    if (autoplay) audio.play().catch(() => {});
+    P2PAudio.load(currentTrack.token, audio).then(() => {
+      if (autoplay) audio.play().catch(() => {});
+    });
   }
 
   // ── Public API ───────────────────────────────────────────────────────

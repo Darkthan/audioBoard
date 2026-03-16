@@ -26,18 +26,79 @@
         <div class="card-title">Paramètres</div>
         <form method="POST" action="/admin/settings">
           <div class="form-group">
-            <label>
-              <input type="checkbox" name="compression_enabled" value="1" <%= settings.compression_enabled==='1'?'checked':'' %>>
-              Compresser les fichiers uploadés (MP3)
-            </label>
+            <label>Codec de compression</label>
+            <div style="display:flex; flex-direction:column; gap:.5rem; margin-top:.25rem;">
+              <% [
+                  { val:'none',     label:'Aucun — fichier original conservé' },
+                  { val:'mp3',      label:'MP3 — compatibilité universelle' },
+                  { val:'aac',      label:'AAC — bonne qualité, compatible iOS/Safari, cache P2P' },
+                  { val:'opus',     label:'Opus — meilleure qualité/taille, cache P2P (pré-encodé)' },
+                  { val:'opus_live',label:'Opus live — transcoding à la volée (sans cache P2P)' },
+                ].forEach(c => { %>
+                <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
+                  <input type="radio" name="compression_codec" value="<%= c.val %>"
+                         <%= (settings.compression_codec||'mp3')===c.val?'checked':'' %>
+                         onchange="updateBitrates(this.value)">
+                  <%= c.label %>
+                </label>
+              <% }) %>
+            </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="bitrate-group">
             <label for="compression_bitrate">Bitrate (kbps)</label>
             <select name="compression_bitrate" id="compression_bitrate" class="form-control">
-              <% ['64','96','128','160','192','256','320'].forEach(b => { %>
-                <option value="<%= b %>" <%= settings.compression_bitrate===b?'selected':'' %>><%= b %> kbps</option>
-              <% }) %>
             </select>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
+              <input type="checkbox" name="webrtc_enabled" value="1" <%= (settings.webrtc_enabled!=='0')?'checked':'' %>>
+              Activer le cache P2P WebRTC (partage entre navigateurs)
+            </label>
+            <p class="text-muted text-sm" style="margin:.25rem 0 0 1.4rem;">Désactiver si WebRTC est bloqué sur votre réseau. Sans effet sur les fichiers Opus live.</p>
+          </div>
+
+          <hr style="border:none; border-top:1px solid var(--border); margin:1.25rem 0;">
+
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
+              <input type="checkbox" name="passwordless_enabled" value="1" <%= (settings.passwordless_enabled==='1')?'checked':'' %>>
+              Activer la connexion par lien email (magic link)
+            </label>
+            <p class="text-muted text-sm" style="margin:.25rem 0 0 1.4rem;">Les utilisateurs peuvent se connecter sans mot de passe si leur email est renseigné.</p>
+          </div>
+
+          <div class="card-title" style="font-size:.85rem; margin:1rem 0 .5rem; color:var(--text-muted);">Configuration SMTP (pour l'envoi des magic links)</div>
+          <div style="display:grid; grid-template-columns:1fr 120px; gap:.5rem;">
+            <div class="form-group" style="margin:0;">
+              <label style="font-size:.8rem;">Serveur SMTP</label>
+              <input type="text" name="smtp_host" class="form-control" value="<%= settings.smtp_host || '' %>" placeholder="smtp.example.com">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label style="font-size:.8rem;">Port</label>
+              <input type="number" name="smtp_port" class="form-control" value="<%= settings.smtp_port || '587' %>">
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:.5rem; margin-top:.5rem;">
+            <div class="form-group" style="margin:0;">
+              <label style="font-size:.8rem;">Utilisateur SMTP</label>
+              <input type="text" name="smtp_user" class="form-control" value="<%= settings.smtp_user || '' %>" autocomplete="off">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label style="font-size:.8rem;">Mot de passe SMTP</label>
+              <input type="password" name="smtp_pass" class="form-control" value="<%= settings.smtp_pass || '' %>" autocomplete="new-password">
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto; gap:.5rem; margin-top:.5rem; align-items:end;">
+            <div class="form-group" style="margin:0;">
+              <label style="font-size:.8rem;">Adresse expéditeur</label>
+              <input type="email" name="smtp_from" class="form-control" value="<%= settings.smtp_from || '' %>" placeholder="audioboard@example.com">
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; font-size:.8rem; padding-bottom:.4rem;">
+                <input type="checkbox" name="smtp_secure" value="1" <%= (settings.smtp_secure==='1')?'checked':'' %>>
+                TLS (port 465)
+              </label>
+            </div>
           </div>
           <div class="form-group">
             <label for="retention_days">Conservation (jours)</label>
@@ -59,6 +120,9 @@
             <input type="password" name="password" class="form-control" placeholder="Mot de passe" required>
           </div>
           <div class="form-group">
+            <input type="email" name="email" class="form-control" placeholder="Email (optionnel, pour magic link)">
+          </div>
+          <div class="form-group">
             <select name="role" class="form-control">
               <option value="uploader">Uploader</option>
               <option value="admin">Admin</option>
@@ -67,11 +131,18 @@
           <button type="submit" class="btn btn-primary btn-sm">Créer</button>
         </form>
         <table>
-          <thead><tr><th>Utilisateur</th><th>Rôle</th><th>Créé le</th><th></th></tr></thead>
+          <thead><tr><th>Utilisateur</th><th>Email</th><th>Rôle</th><th>Créé le</th><th></th></tr></thead>
           <tbody>
             <% users.forEach(u => { %>
               <tr>
                 <td><%= u.username %></td>
+                <td>
+                  <form method="POST" action="/admin/users/<%= u.id %>/email" style="display:flex; gap:.25rem; align-items:center;">
+                    <input type="email" name="email" value="<%= u.email || '' %>" placeholder="—"
+                           class="form-control" style="font-size:.8rem; padding:.2rem .5rem; height:auto; min-width:160px;">
+                    <button type="submit" class="btn btn-secondary btn-sm" style="white-space:nowrap;">OK</button>
+                  </form>
+                </td>
                 <td><span class="badge badge-<%= u.role %>"><%= u.role %></span></td>
                 <td class="text-muted"><%= new Date(u.created_at).toLocaleDateString('fr-FR') %></td>
                 <td>
@@ -136,6 +207,30 @@
     function copyPlaylistLink(token) {
       navigator.clipboard.writeText(location.origin + '/playlist/' + token).then(() => alert('Lien copié !'));
     }
+
+    const OPUS_BR = ['32','48','64','96','128','160','192'];
+    const BITRATES = {
+      none:     [],
+      mp3:      ['64','96','128','160','192','256','320'],
+      aac:      ['64','96','128','160','192','256'],
+      opus:     OPUS_BR,
+      opus_live:OPUS_BR,
+    };
+    const currentBitrate = '<%= settings.compression_bitrate || "128" %>';
+
+    function updateBitrates(codec) {
+      const sel = document.getElementById('compression_bitrate');
+      const group = document.getElementById('bitrate-group');
+      const list = BITRATES[codec] || [];
+      group.style.display = list.length ? '' : 'none';
+      sel.innerHTML = list.map(b =>
+        `<option value="${b}"${b === currentBitrate ? ' selected' : ''}>${b} kbps</option>`
+      ).join('');
+    }
+
+    // Init on page load
+    const checkedCodec = document.querySelector('[name=compression_codec]:checked');
+    if (checkedCodec) updateBitrates(checkedCodec.value);
   </script>
 </body>
 </html>
