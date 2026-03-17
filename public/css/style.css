@@ -301,6 +301,42 @@ select.form-control {
 }
 
 @media (max-width: 768px) {
+  .shared-link-create .form-group {
+    width: 100%;
+  }
+  .shared-link-list-item {
+    padding: 0.65rem;
+  }
+  .playlist-checkboxes, .multi-select {
+    gap: 0.35rem;
+  }
+  .playlist-checkbox .playlist-checkbox-text {
+    padding: 0.35rem 0.45rem;
+  }
+  .playlist-checkbox {
+    padding: 0.35rem 0.4rem;
+  }
+  .shared-links-section {
+    padding: 0.75rem;
+  }
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+  table {
+    width: 100%;
+    overflow-x: auto;
+    display: block;
+  }
+  .table-wrap {
+    overflow-x: auto;
+  }
+  .shared-link-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 768px) {
   .admin-grid {
     grid-template-columns: 1fr;
   }
