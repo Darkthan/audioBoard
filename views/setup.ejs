@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AudioBoard - Configuration initiale</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-box">
+      <h1>AudioBoard</h1>
+      <p class="subtitle">Créez le compte administrateur</p>
+      <p class="text-muted text-sm" style="text-align:center; margin-bottom:1.5rem;">
+        Aucun compte n'existe encore. Ce formulaire ne s'affiche qu'une seule fois.
+      </p>
+
+      <% if (error) { %>
+        <div class="alert alert-error"><%= error %></div>
+      <% } %>
+
+      <form method="POST" action="/setup">
+        <div class="form-group">
+          <label for="username">Nom d'utilisateur</label>
+          <input type="text" id="username" name="username" class="form-control"
+                 value="admin" required autofocus minlength="2" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="password">Mot de passe <span class="text-muted text-sm">(8 caractères min.)</span></label>
+          <input type="password" id="password" name="password" class="form-control"
+                 required minlength="8" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+          <label for="confirm">Confirmer le mot de passe</label>
+          <input type="password" id="confirm" name="confirm" class="form-control"
+                 required minlength="8" autocomplete="new-password">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; margin-top:0.5rem;">
+          Créer le compte et démarrer
+        </button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

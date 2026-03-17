@@ -305,9 +305,14 @@ const defaults = {
 const upsertIgnore = db.prepare('INSERT OR IGNORE INTO settings (key,value) VALUES (?,?)');
 for (const [k,v] of Object.entries(defaults)) upsertIgnore.run(k, v);
 
-if (!stmt.getAdminExists.get()) {
-  stmt.insertUser.run('admin', bcrypt.hashSync('admin',10), ROLES.ADMIN, null);
-  console.log('Compte admin créé : admin / admin');
+// ── Initial admin setup ───────────────────────────────────────────────────────
+let setupDone = !!stmt.getAdminExists.get();
+if (!setupDone && process.env.ADMIN_PASSWORD) {
+  const adminUser = (process.env.ADMIN_USER || 'admin').trim();
+  const adminPass = process.env.ADMIN_PASSWORD.trim();
+  stmt.insertUser.run(adminUser, bcrypt.hashSync(adminPass, 10), ROLES.ADMIN, null);
+  console.log(`Compte admin créé depuis l'environnement : ${adminUser}`);
+  setupDone = true;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -428,6 +433,35 @@ app.use(session({
   resave: false, saveUninitialized: false,
   cookie: { maxAge: 24 * 60 * 60 * 1000 },
 }));
+
+// ── Setup guard ───────────────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  if (setupDone) return next();
+  const allowed = req.path === '/setup' || req.path.startsWith('/css/') || req.path.startsWith('/js/');
+  if (allowed) return next();
+  res.redirect('/setup');
+});
+
+app.get('/setup', (req, res) => {
+  if (setupDone) return res.redirect('/');
+  res.render('setup', { error: null });
+});
+
+app.post('/setup', (req, res) => {
+  if (setupDone) return res.redirect('/');
+  const username = (req.body.username || '').trim();
+  const password = (req.body.password || '').trim();
+  const confirm  = (req.body.confirm  || '').trim();
+  if (!username || username.length < 2)
+    return res.render('setup', { error: 'Le nom d\'utilisateur doit faire au moins 2 caractères.' });
+  if (password.length < 8)
+    return res.render('setup', { error: 'Le mot de passe doit faire au moins 8 caractères.' });
+  if (password !== confirm)
+    return res.render('setup', { error: 'Les mots de passe ne correspondent pas.' });
+  stmt.insertUser.run(username, bcrypt.hashSync(password, 10), ROLES.ADMIN, null);
+  setupDone = true;
+  res.redirect('/login?info=Compte+administrateur+créé,+connectez-vous.');
+});
 
 function requireAuth(req, res, next)  { if (req.session.user) return next(); res.redirect('/login'); }
 function requireAdmin(req, res, next) {
