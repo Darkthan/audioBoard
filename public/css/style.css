@@ -300,6 +300,37 @@ select.form-control {
   min-height: 160px;
 }
 
+@media (max-width: 768px) {
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shared-links-section {
+    padding: 1rem;
+  }
+
+  .shared-link-create {
+    align-items: stretch;
+  }
+
+  .shared-link-list-item {
+    padding: 0.75rem;
+  }
+
+  .shared-link-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .playlist-checkboxes {
+    max-height: none;
+  }
+
+  .shared-link-form {
+    padding-top: 0.75rem;
+  }
+}
+
 @media (max-width: 900px) {
   .admin-grid {
     grid-template-columns: 1fr !important;
