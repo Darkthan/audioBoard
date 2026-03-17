@@ -124,6 +124,33 @@ db.exec(`
     // Backfill: compressed=1 → mp3
     db.exec("UPDATE audio_files SET codec='mp3' WHERE compressed=1");
   }
+
+  // Add audio metadata columns
+  if (!afCols.includes('duration'))   db.exec('ALTER TABLE audio_files ADD COLUMN duration REAL');
+  if (!afCols.includes('artist'))     db.exec('ALTER TABLE audio_files ADD COLUMN artist TEXT');
+  if (!afCols.includes('album'))      db.exec('ALTER TABLE audio_files ADD COLUMN album TEXT');
+  if (!afCols.includes('title_tag'))  db.exec('ALTER TABLE audio_files ADD COLUMN title_tag TEXT');
+  if (!afCols.includes('has_cover'))  db.exec('ALTER TABLE audio_files ADD COLUMN has_cover INTEGER DEFAULT 0');
+  if (!afCols.includes('waveform'))   db.exec('ALTER TABLE audio_files ADD COLUMN waveform TEXT');
+  if (!afCols.includes('play_count')) db.exec('ALTER TABLE audio_files ADD COLUMN play_count INTEGER DEFAULT 0');
+
+  // Add playlist settings columns
+  const plCols = db.prepare('PRAGMA table_info(playlists)').all().map(c => c.name);
+  if (!plCols.includes('allow_download'))   db.exec('ALTER TABLE playlists ADD COLUMN allow_download INTEGER DEFAULT 0');
+  if (!plCols.includes('playlist_password')) db.exec('ALTER TABLE playlists ADD COLUMN playlist_password TEXT');
+
+  // Add user quota column
+  if (!userCols.includes('quota_mb')) db.exec('ALTER TABLE users ADD COLUMN quota_mb INTEGER');
+
+  // Play events table
+  db.exec(`CREATE TABLE IF NOT EXISTS play_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id INTEGER NOT NULL REFERENCES audio_files(id) ON DELETE CASCADE,
+    played_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Covers directory
+  fs.mkdirSync(path.join(UPLOADS_DIR, 'covers'), { recursive: true });
 })();
 
 // ── Cached statements ─────────────────────────────────────────────────────────
@@ -180,8 +207,10 @@ const stmt = {
   getFilesByPlaylistId:   db.prepare('SELECT filename FROM audio_files WHERE playlist_id=?'),
   maxPositionInPlaylist:  db.prepare('SELECT COALESCE(MAX(position),-1) as m FROM audio_files WHERE playlist_id=?'),
   insertFile: db.prepare(`
-    INSERT INTO audio_files (original_name,filename,share_token,playlist_id,uploaded_by,position,size,compressed,codec,expires_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?)
+    INSERT INTO audio_files
+      (original_name,filename,share_token,playlist_id,uploaded_by,position,size,compressed,codec,expires_at,
+       duration,artist,album,title_tag,has_cover,waveform,play_count)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
   `),
   updateFilePosition:    db.prepare('UPDATE audio_files SET position=? WHERE id=? AND playlist_id=?'),
   deleteFile:            db.prepare('DELETE FROM audio_files WHERE id=?'),
@@ -189,6 +218,37 @@ const stmt = {
   countFiles:  db.prepare('SELECT COUNT(*) as c FROM audio_files'),
   sumFileSize: db.prepare('SELECT COALESCE(SUM(size),0) as s FROM audio_files'),
   getExpired:  db.prepare("SELECT id,filename FROM audio_files WHERE expires_at IS NOT NULL AND expires_at<datetime('now')"),
+
+  // Metadata & stats
+  getFilesPublicPlaylistFull: db.prepare(`
+    SELECT af.id,af.original_name,af.share_token,af.size,af.compressed,af.codec,
+           af.expires_at,af.position,af.duration,af.artist,af.album,af.title_tag,af.has_cover,af.play_count
+    FROM audio_files af WHERE af.playlist_id=? ORDER BY af.position ASC, af.created_at ASC
+  `),
+  getWaveform:        db.prepare('SELECT waveform FROM audio_files WHERE share_token=?'),
+  incrementPlayCount: db.prepare('UPDATE audio_files SET play_count = play_count + 1 WHERE share_token=?'),
+  insertPlayEvent:    db.prepare('SELECT id FROM audio_files WHERE share_token=?'),
+  getFileIdByToken:   db.prepare('SELECT id FROM audio_files WHERE share_token=?'),
+  insertPlayEvt:      db.prepare('INSERT INTO play_events (file_id) VALUES (?)'),
+  getTopTracks:       db.prepare(`
+    SELECT af.original_name,af.share_token,af.play_count,af.artist,p.name as playlist_name
+    FROM audio_files af LEFT JOIN playlists p ON af.playlist_id=p.id
+    ORDER BY af.play_count DESC LIMIT 10
+  `),
+  getPlaysToday:  db.prepare("SELECT COUNT(*) as c FROM play_events WHERE played_at >= datetime('now','start of day')"),
+  getPlaysPerDay: db.prepare(`
+    SELECT date(played_at) as day, COUNT(*) as c FROM play_events
+    WHERE played_at >= datetime('now','-6 days') GROUP BY day ORDER BY day
+  `),
+  // Playlist settings
+  getPlaylistFull:          db.prepare('SELECT id,name,owner_id,share_token,allow_download,playlist_password FROM playlists WHERE id=?'),
+  getPlaylistByShareTokenFull: db.prepare('SELECT id,name,owner_id,allow_download,playlist_password FROM playlists WHERE share_token=?'),
+  updatePlaylistSettings:   db.prepare('UPDATE playlists SET allow_download=?, playlist_password=? WHERE id=?'),
+  // Quota
+  getUserFull:          db.prepare('SELECT id,username,role,email,quota_mb FROM users WHERE id=?'),
+  getAllUsersFull:       db.prepare('SELECT id,username,role,email,quota_mb,created_at FROM users ORDER BY created_at'),
+  getUserStorageUsed:   db.prepare('SELECT COALESCE(SUM(size),0) as total FROM audio_files WHERE uploaded_by=?'),
+  updateUserQuota:      db.prepare('UPDATE users SET quota_mb=? WHERE id=?'),
 };
 
 // ── Default settings & admin ──────────────────────────────────────────────────
@@ -198,6 +258,7 @@ const defaults = {
   webrtc_enabled:'1',
   passwordless_enabled:'0',
   smtp_host:'', smtp_port:'587', smtp_secure:'0', smtp_user:'', smtp_pass:'', smtp_from:'',
+  default_quota_mb: '0',
 };
 const upsertIgnore = db.prepare('INSERT OR IGNORE INTO settings (key,value) VALUES (?,?)');
 for (const [k,v] of Object.entries(defaults)) upsertIgnore.run(k, v);
@@ -226,6 +287,58 @@ function createTransporter() {
     port: parseInt(getSetting('smtp_port') || '587'),
     secure: getSetting('smtp_secure') === '1',
     auth: { user: getSetting('smtp_user'), pass: getSetting('smtp_pass') },
+  });
+}
+
+const escXml = s => String(s || '')
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function fmtDuration(secs) {
+  if (!secs) return '0:00';
+  return Math.floor(secs / 60) + ':' + String(Math.floor(secs % 60)).padStart(2, '0');
+}
+
+async function extractMetadata(filePath) {
+  try {
+    const { parseFile } = await import('music-metadata');
+    const meta = await parseFile(filePath, { duration: true });
+    return {
+      duration: meta.format.duration || null,
+      artist:   meta.common.artist   || null,
+      album:    meta.common.album    || null,
+      title:    meta.common.title    || null,
+      cover:    (meta.common.picture && meta.common.picture[0]) || null,
+    };
+  } catch { return {}; }
+}
+
+async function extractWaveform(filePath, durationSecs) {
+  const BARS = 200;
+  const targetRate = Math.max(4, Math.ceil(BARS / Math.max(durationSecs || 180, 1)));
+  return new Promise((res) => {
+    const bufs = [];
+    const proc = ffmpeg(filePath).noVideo().audioChannels(1).audioFrequency(targetRate).format('f32le');
+    proc.on('error', () => res(null));
+    const stream = proc.pipe();
+    stream.on('data', b => bufs.push(b));
+    stream.on('end', () => {
+      try {
+        const buf = Buffer.concat(bufs);
+        const n = Math.floor(buf.byteLength / 4);
+        if (n < 2) return res(null);
+        const bs = Math.max(1, Math.floor(n / BARS));
+        const raw = Array.from({ length: BARS }, (_, i) => {
+          let max = 0;
+          for (let j = 0; j < bs; j++) {
+            const off = (i * bs + j) * 4;
+            if (off + 4 <= buf.byteLength) max = Math.max(max, Math.abs(buf.readFloatLE(off)));
+          }
+          return max;
+        });
+        const peak = Math.max(...raw, 0.001);
+        res(raw.map(v => parseFloat((v / peak).toFixed(3))));
+      } catch { res(null); }
+    });
   });
 }
 
@@ -346,7 +459,10 @@ app.get('/', requireAuth, (req, res) => {
   const playlists = user.role === ROLES.ADMIN
     ? stmt.getAllPlaylists.all()
     : stmt.getPlaylistsByOwner.all(user.id);
-  res.render('dashboard', { playlists, error: req.query.error || null });
+  const userFull  = stmt.getUserFull.get(user.id);
+  const quotaMb   = userFull?.quota_mb ?? parseInt(getSetting('default_quota_mb') || '0');
+  const storageUsed = quotaMb > 0 ? stmt.getUserStorageUsed.get(user.id).total : 0;
+  res.render('dashboard', { playlists, error: req.query.error || null, quotaMb, storageUsed });
 });
 
 // ── Playlists CRUD ────────────────────────────────────────────────────────────
@@ -396,6 +512,24 @@ app.post('/playlists/:id/revoke', requireAuth, (req, res) => {
   res.redirect('/playlists/' + playlist.id);
 });
 
+app.post('/playlists/:id/settings', requireAuth, async (req, res) => {
+  const playlist = stmt.getPlaylistById.get(req.params.id);
+  if (!playlist || !canManage(req.session.user, playlist)) return res.redirect('/');
+  const allowDownload = req.body.allow_download === '1' ? 1 : 0;
+  let passwordHash = null;
+  if (req.body.remove_password) {
+    passwordHash = null; // suppression explicite
+  } else if (req.body.playlist_password && req.body.playlist_password.trim()) {
+    passwordHash = bcrypt.hashSync(req.body.playlist_password.trim(), 10);
+  } else if (req.body.keep_password === '1') {
+    // Conserver le mot de passe existant
+    const pl = stmt.getPlaylistFull.get(playlist.id);
+    passwordHash = pl?.playlist_password || null;
+  }
+  stmt.updatePlaylistSettings.run(allowDownload, passwordHash, playlist.id);
+  res.redirect('/playlists/' + playlist.id);
+});
+
 // Reorder tracks (JSON API)
 app.post('/playlists/:id/reorder', requireAuth, (req, res) => {
   const playlist = stmt.getPlaylistById.get(req.params.id);
@@ -408,11 +542,14 @@ app.post('/playlists/:id/reorder', requireAuth, (req, res) => {
 
 // ── Playlist editor page ──────────────────────────────────────────────────────
 app.get('/playlists/:id', requireAuth, (req, res) => {
-  const playlist = stmt.getPlaylistById.get(req.params.id);
+  const playlist = stmt.getPlaylistFull.get(req.params.id) || stmt.getPlaylistById.get(req.params.id);
   if (!playlist || !canManage(req.session.user, playlist))
     return res.status(404).render('error', { message:'Playlist introuvable', user: req.session.user });
   const files = stmt.getFilesForPlaylist.all(playlist.id);
-  res.render('playlist-editor', { playlist, files, error: req.query.error || null });
+  const user = stmt.getUserFull.get(req.session.user.id);
+  const quotaMb = user?.quota_mb ?? parseInt(getSetting('default_quota_mb') || '0');
+  const storageUsed = quotaMb > 0 ? stmt.getUserStorageUsed.get(req.session.user.id).total : 0;
+  res.render('playlist-editor', { playlist, files, error: req.query.error || null, quotaMb, storageUsed });
 });
 
 // ── Upload ────────────────────────────────────────────────────────────────────
@@ -449,18 +586,41 @@ async function persistFile(file, playlistId, userId, options) {
         ffmpeg(file.path).audioCodec('aac').audioChannels(2).audioBitrate(options.bitrate).format('adts'));
       codec = 'aac';
     } else if (options.codec === 'opus_live') {
-      // Fichier original conservé, transcoding à la volée au moment du stream
       codec = 'opus_live';
     }
-    // none : fichier original conservé, codec reste 'none'
   } catch (err) {
     console.error(`Compression [${options.codec}]:`, err.message);
   }
 
-  const stats = fs.statSync(safeUploadPath(finalFilename));
+  const finalPath = safeUploadPath(finalFilename);
+  const stats     = fs.statSync(finalPath);
+
+  // Métadonnées ID3 + durée
+  const meta     = await extractMetadata(finalPath);
+  const duration = meta.duration || null;
+
+  // Pochette
+  let hasCover = 0;
+  if (meta.cover) {
+    try {
+      const coverPath = path.join(UPLOADS_DIR, 'covers', `${shareToken}.jpg`);
+      fs.writeFileSync(coverPath, meta.cover.data);
+      hasCover = 1;
+    } catch {}
+  }
+
+  // Waveform (en arrière-plan pour ne pas bloquer)
+  let waveformJson = null;
+  try {
+    const peaks = await extractWaveform(finalPath, duration);
+    if (peaks) waveformJson = JSON.stringify(peaks);
+  } catch {}
+
   stmt.insertFile.run(
     file.originalname, finalFilename, shareToken, playlistId, userId,
-    position, stats.size, codec !== 'none' ? 1 : 0, codec, expiresAt
+    position, stats.size, codec !== 'none' ? 1 : 0, codec, expiresAt,
+    duration, meta.artist || null, meta.album || null, meta.title || null,
+    hasCover, waveformJson
   );
 }
 
@@ -471,6 +631,16 @@ app.post('/upload', requireAuth, upload.array('audio', 50), async (req, res) => 
     const playlist = stmt.getPlaylistById.get(playlist_id);
     if (!playlist || !canManage(req.session.user, playlist))
       return res.status(403).json({ error:'Non autorisé' });
+
+    // Vérification quota
+    const userFull = stmt.getUserFull.get(req.session.user.id);
+    const quotaMb = userFull?.quota_mb ?? parseInt(getSetting('default_quota_mb') || '0');
+    if (quotaMb > 0) {
+      const used     = stmt.getUserStorageUsed.get(req.session.user.id).total || 0;
+      const incoming = req.files.reduce((s, f) => s + f.size, 0);
+      if (used + incoming > quotaMb * 1048576)
+        return res.status(413).json({ error: `Quota dépassé (${quotaMb} Mo)` });
+    }
 
     const options = {
       retentionDays: parseInt(getSetting('retention_days'), 10),
@@ -483,6 +653,28 @@ app.post('/upload', requireAuth, upload.array('audio', 50), async (req, res) => 
     console.error('Upload error:', err);
     res.status(500).json({ error:"Erreur lors de l'upload" });
   }
+});
+
+// ── Covers ────────────────────────────────────────────────────────────────────
+app.get('/covers/:token', (req, res) => {
+  const p = path.join(UPLOADS_DIR, 'covers', path.basename(req.params.token) + '.jpg');
+  if (fs.existsSync(p)) res.sendFile(p);
+  else res.status(404).end();
+});
+
+// ── Download ──────────────────────────────────────────────────────────────────
+app.get('/download/:token', (req, res) => {
+  const file = stmt.getFileByTokenWithPlaylist.get(req.params.token);
+  if (!file) return res.status(404).send('Not found');
+  if (isExpired(file)) return res.status(410).send('Expired');
+  // Vérifier que allow_download est activé sur la playlist (pour les accès non authentifiés)
+  if (!req.session.user) {
+    const pl = file.playlist_id ? stmt.getPlaylistFull.get(file.playlist_id) : null;
+    if (!pl?.allow_download) return res.status(403).send('Téléchargement non autorisé');
+  }
+  const filePath = safeUploadPath(file.filename);
+  try { fs.statSync(filePath); } catch { return res.status(404).send('File missing'); }
+  res.download(filePath, file.original_name || path.basename(filePath));
 });
 
 // ── File delete ───────────────────────────────────────────────────────────────
@@ -542,21 +734,146 @@ app.get('/stream/:token', (req, res) => {
 
 // ── Public playlist page ──────────────────────────────────────────────────────
 app.get('/playlist/:token', (req, res) => {
-  const playlist = stmt.getPlaylistByShareToken.get(req.params.token);
+  const playlist = stmt.getPlaylistByShareTokenFull.get(req.params.token);
   if (!playlist) return res.status(404).render('error', { message:'Playlist introuvable', user:null });
-  const files = stmt.getFilesPublicPlaylist.all(playlist.id).filter(f => !isExpired(f));
+  // Protection par mot de passe
+  if (playlist.playlist_password && !req.session['pl_auth_' + req.params.token]) {
+    return res.render('playlist-locked', { token: req.params.token, error: null });
+  }
+  const files = stmt.getFilesPublicPlaylistFull.all(playlist.id).filter(f => !isExpired(f));
   res.render('playlist', { playlist, files });
+});
+
+app.post('/playlist/:token/auth', (req, res) => {
+  const playlist = stmt.getPlaylistByShareTokenFull.get(req.params.token);
+  if (!playlist?.playlist_password) return res.redirect('/playlist/' + req.params.token);
+  if (bcrypt.compareSync(req.body.password || '', playlist.playlist_password)) {
+    req.session['pl_auth_' + req.params.token] = true;
+    return res.redirect('/playlist/' + req.params.token);
+  }
+  res.render('playlist-locked', { token: req.params.token, error: 'Mot de passe incorrect' });
+});
+
+// ── Playlist RSS feed ─────────────────────────────────────────────────────────
+app.get('/playlist/:token/rss', (req, res) => {
+  const playlist = stmt.getPlaylistByShareTokenFull.get(req.params.token);
+  if (!playlist) return res.status(404).send('Not found');
+  if (playlist.playlist_password && !req.session['pl_auth_' + req.params.token])
+    return res.status(403).send('Forbidden');
+  const files = stmt.getFilesPublicPlaylistFull.all(playlist.id).filter(f => !isExpired(f));
+  const base  = `${req.protocol}://${req.get('host')}`;
+  res.type('application/rss+xml; charset=utf-8');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>${escXml(playlist.name)}</title>
+    <link>${escXml(base + '/playlist/' + req.params.token)}</link>
+    <description>${escXml(playlist.name)}</description>
+    <atom:link href="${escXml(base + '/playlist/' + req.params.token + '/rss')}" rel="self" type="application/rss+xml"/>
+    ${files.map(f => `<item>
+      <title>${escXml(f.title_tag || f.original_name.replace(/\.[^.]+$/, ''))}</title>
+      ${f.artist ? `<itunes:author>${escXml(f.artist)}</itunes:author>` : ''}
+      ${f.album  ? `<itunes:subtitle>${escXml(f.album)}</itunes:subtitle>` : ''}
+      <enclosure url="${escXml(base + '/stream/' + f.share_token)}" type="${CODEC_MIME[f.codec] || 'audio/mpeg'}" length="${f.size || 0}"/>
+      ${f.duration ? `<itunes:duration>${fmtDuration(f.duration)}</itunes:duration>` : ''}
+      <guid isPermaLink="false">${f.share_token}</guid>
+      <pubDate>${new Date(f.created_at || Date.now()).toUTCString()}</pubDate>
+    </item>`).join('\n    ')}
+  </channel>
+</rss>`);
+});
+
+// ── Waveform API ──────────────────────────────────────────────────────────────
+app.get('/api/waveform/:token', (req, res) => {
+  const row = stmt.getWaveform.get(req.params.token);
+  if (!row?.waveform) return res.json({ peaks: null });
+  try {
+    res.json({ peaks: JSON.parse(row.waveform) });
+  } catch { res.json({ peaks: null }); }
+});
+
+// ── Play tracking ─────────────────────────────────────────────────────────────
+app.post('/api/play/:token', (req, res) => {
+  const row = stmt.getFileIdByToken.get(req.params.token);
+  if (!row) return res.status(404).end();
+  stmt.incrementPlayCount.run(req.params.token);
+  stmt.insertPlayEvt.run(row.id);
+  res.status(204).end();
+});
+
+// ── REST API v1 ───────────────────────────────────────────────────────────────
+app.get('/api/v1/playlist/:token', (req, res) => {
+  const playlist = stmt.getPlaylistByShareTokenFull.get(req.params.token);
+  if (!playlist) return res.status(404).json({ error: 'Not found' });
+  if (playlist.playlist_password && !req.session['pl_auth_' + req.params.token])
+    return res.status(403).json({ error: 'Password required' });
+  const tracks = stmt.getFilesPublicPlaylistFull.all(playlist.id)
+    .filter(f => !isExpired(f))
+    .map(f => ({
+      token: f.share_token, name: f.title_tag || f.original_name.replace(/\.[^.]+$/,''),
+      original_name: f.original_name, artist: f.artist, album: f.album,
+      duration: f.duration, size: f.size, codec: f.codec,
+      stream_url: `/stream/${f.share_token}`,
+      cover_url: f.has_cover ? `/covers/${f.share_token}` : null,
+      play_count: f.play_count,
+    }));
+  res.json({ id: playlist.id, name: playlist.name, track_count: tracks.length, tracks });
+});
+
+app.get('/api/v1/me', requireAuth, (req, res) => {
+  const u = stmt.getUserFull.get(req.session.user.id);
+  res.json({ id: u.id, username: u.username, role: u.role });
+});
+
+app.get('/api/v1/me/playlists', requireAuth, (req, res) => {
+  const playlists = req.session.user.role === ROLES.ADMIN
+    ? stmt.getAllPlaylists.all()
+    : stmt.getPlaylistsByOwner.all(req.session.user.id);
+  res.json(playlists);
+});
+
+app.get('/api/v1/me/playlists/:id/tracks', requireAuth, (req, res) => {
+  const playlist = stmt.getPlaylistById.get(req.params.id);
+  if (!playlist || !canManage(req.session.user, playlist))
+    return res.status(403).json({ error: 'Forbidden' });
+  const tracks = stmt.getFilesForPlaylist.all(playlist.id);
+  res.json(tracks);
+});
+
+// ── Embed ─────────────────────────────────────────────────────────────────────
+app.get('/embed/:token', (req, res) => {
+  const playlist = stmt.getPlaylistByShareTokenFull.get(req.params.token);
+  if (!playlist) return res.status(404).render('error', { message:'Playlist introuvable', user:null });
+  if (playlist.playlist_password && !req.session['pl_auth_' + req.params.token])
+    return res.status(403).render('error', { message:'Accès restreint', user:null });
+  const files = stmt.getFilesPublicPlaylistFull.all(playlist.id).filter(f => !isExpired(f));
+  res.render('embed', { playlist, files });
 });
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 app.get('/admin', requireAdmin, (req, res) => {
-  const users = stmt.getAllUsers.all();
+  const users = stmt.getAllUsersFull.all();
   const playlists = stmt.getAllPlaylists.all();
   const settings = {};
   stmt.getAllSettings.all().forEach(s => { settings[s.key] = s.value; });
+
+  // Stats utilisation par user
+  const usersWithStorage = users.map(u => ({
+    ...u,
+    storage_used: stmt.getUserStorageUsed.get(u.id).total,
+  }));
+
   res.render('admin', {
-    users, playlists, settings,
-    stats: { totalFiles: stmt.countFiles.get().c, totalSize: stmt.sumFileSize.get().s, totalUsers: users.length, totalPlaylists: playlists.length },
+    users: usersWithStorage, playlists, settings,
+    stats: {
+      totalFiles: stmt.countFiles.get().c,
+      totalSize:  stmt.sumFileSize.get().s,
+      totalUsers: users.length,
+      totalPlaylists: playlists.length,
+      playsToday: stmt.getPlaysToday.get().c,
+      topTracks:  stmt.getTopTracks.all(),
+      playsPerDay: stmt.getPlaysPerDay.all(),
+    },
     error: req.query.error || null,
   });
 });
@@ -573,6 +890,12 @@ app.post('/admin/users', requireAdmin, (req, res) => {
 
 app.post('/admin/users/:id/email', requireAdmin, (req, res) => {
   stmt.updateUserEmail.run((req.body.email || '').trim() || null, parseInt(req.params.id, 10));
+  res.redirect('/admin');
+});
+
+app.post('/admin/users/:id/quota', requireAdmin, (req, res) => {
+  const quota = parseInt(req.body.quota_mb, 10);
+  stmt.updateUserQuota.run(isNaN(quota) || quota <= 0 ? null : quota, parseInt(req.params.id, 10));
   res.redirect('/admin');
 });
 
