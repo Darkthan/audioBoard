@@ -23,6 +23,14 @@
     burger.addEventListener('click', () => {
       links.classList.toggle('navbar-links--open');
       burger.classList.toggle('navbar-burger--open');
+      burger.setAttribute('aria-expanded', burger.classList.contains('navbar-burger--open') ? 'true' : 'false');
+    });
+    links.querySelectorAll('a').forEach(link => {
+      link.addEventListener('click', () => {
+        links.classList.remove('navbar-links--open');
+        burger.classList.remove('navbar-burger--open');
+        burger.setAttribute('aria-expanded', 'false');
+      });
     });
   });
 </script>

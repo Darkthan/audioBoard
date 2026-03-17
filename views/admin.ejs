@@ -190,52 +190,54 @@
           </div>
           <button type="submit" class="btn btn-primary btn-sm">Créer</button>
         </form>
-        <table>
-          <thead><tr><th>Utilisateur</th><th>Email</th><th>Rôle</th><th>Stockage</th><th>Quota (Mo)</th><th>Créé le</th><th></th></tr></thead>
-          <tbody>
-            <% users.forEach(u => {
-               const usedMb = (u.storage_used / 1048576).toFixed(1);
-               const quotaMb = u.quota_mb || 0;
-               const pct = quotaMb > 0 ? Math.min(100, Math.round(u.storage_used / (quotaMb * 1048576) * 100)) : 0;
-            %>
-              <tr>
-                <td><%= u.username %></td>
-                <td>
-                  <form method="POST" action="/admin/users/<%= u.id %>/email" style="display:flex; gap:.25rem; align-items:center;">
-                    <input type="email" name="email" value="<%= u.email || '' %>" placeholder="—"
-                           class="form-control" style="font-size:.8rem; padding:.2rem .5rem; height:auto; min-width:160px;">
-                    <button type="submit" class="btn btn-secondary btn-sm" style="white-space:nowrap;">OK</button>
-                  </form>
-                </td>
-                <td><span class="badge badge-<%= u.role %>"><%= u.role %></span></td>
-                <td style="white-space:nowrap;">
-                  <span class="text-muted text-sm"><%= usedMb %> Mo</span>
-                  <% if (quotaMb > 0) { %>
-                  <div style="background:var(--border); border-radius:3px; height:4px; width:80px; margin-top:3px;">
-                    <div style="width:<%= pct %>%; background:<%= pct>=90?'var(--danger)':pct>=70?'var(--warning)':'var(--primary)' %>; height:100%; border-radius:3px;"></div>
-                  </div>
-                  <% } %>
-                </td>
-                <td>
-                  <form method="POST" action="/admin/users/<%= u.id %>/quota" style="display:flex; gap:.25rem; align-items:center;">
-                    <input type="number" name="quota_mb" value="<%= quotaMb || '' %>" placeholder="∞" min="1"
-                           class="form-control" style="font-size:.8rem; padding:.2rem .5rem; height:auto; width:80px;">
-                    <button type="submit" class="btn btn-secondary btn-sm">OK</button>
-                  </form>
-                </td>
-                <td class="text-muted"><%= new Date(u.created_at).toLocaleDateString('fr-FR') %></td>
-                <td>
-                  <% if (u.id !== user.id) { %>
-                    <form method="POST" action="/admin/users/<%= u.id %>/delete" style="display:inline;"
-                          onsubmit="return confirm('Supprimer cet utilisateur et toutes ses playlists ?')">
-                      <button type="submit" class="btn btn-danger btn-sm">Suppr.</button>
+        <div class="table-wrap">
+          <table class="admin-users-table">
+            <thead><tr><th>Utilisateur</th><th>Email</th><th>Rôle</th><th>Stockage</th><th>Quota (Mo)</th><th>Créé le</th><th></th></tr></thead>
+            <tbody>
+              <% users.forEach(u => {
+                 const usedMb = (u.storage_used / 1048576).toFixed(1);
+                 const quotaMb = u.quota_mb || 0;
+                 const pct = quotaMb > 0 ? Math.min(100, Math.round(u.storage_used / (quotaMb * 1048576) * 100)) : 0;
+              %>
+                <tr>
+                  <td><%= u.username %></td>
+                  <td>
+                    <form method="POST" action="/admin/users/<%= u.id %>/email" class="admin-cell-form">
+                      <input type="email" name="email" value="<%= u.email || '' %>" placeholder="—"
+                             class="form-control admin-cell-input" style="font-size:.8rem; padding:.2rem .5rem; height:auto; min-width:160px;">
+                      <button type="submit" class="btn btn-secondary btn-sm" style="white-space:nowrap;">OK</button>
                     </form>
-                  <% } %>
-                </td>
-              </tr>
-            <% }) %>
-          </tbody>
-        </table>
+                  </td>
+                  <td><span class="badge badge-<%= u.role %>"><%= u.role %></span></td>
+                  <td style="white-space:nowrap;">
+                    <span class="text-muted text-sm"><%= usedMb %> Mo</span>
+                    <% if (quotaMb > 0) { %>
+                    <div style="background:var(--border); border-radius:3px; height:4px; width:80px; margin-top:3px;">
+                      <div style="width:<%= pct %>%; background:<%= pct>=90?'var(--danger)':pct>=70?'var(--warning)':'var(--primary)' %>; height:100%; border-radius:3px;"></div>
+                    </div>
+                    <% } %>
+                  </td>
+                  <td>
+                    <form method="POST" action="/admin/users/<%= u.id %>/quota" class="admin-cell-form">
+                      <input type="number" name="quota_mb" value="<%= quotaMb || '' %>" placeholder="∞" min="1"
+                             class="form-control admin-cell-input admin-cell-input-small" style="font-size:.8rem; padding:.2rem .5rem; height:auto; width:80px;">
+                      <button type="submit" class="btn btn-secondary btn-sm">OK</button>
+                    </form>
+                  </td>
+                  <td class="text-muted"><%= new Date(u.created_at).toLocaleDateString('fr-FR') %></td>
+                  <td>
+                    <% if (u.id !== user.id) { %>
+                      <form method="POST" action="/admin/users/<%= u.id %>/delete" style="display:inline;"
+                            onsubmit="return confirm('Supprimer cet utilisateur et toutes ses playlists ?')">
+                        <button type="submit" class="btn btn-danger btn-sm">Suppr.</button>
+                      </form>
+                    <% } %>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="card shared-links-section span-full">
@@ -287,11 +289,15 @@
                   </form>
                 </div>
                 <form method="POST" action="/admin/shared-links/<%= link.id %>/update" class="shared-link-form" id="link-<%= link.id %>">
+                  <input type="text" placeholder="Rechercher des playlists" class="form-control shared-playlist-search" aria-label="Recherche playlists">
                   <div class="playlist-checkboxes multi-select">
                     <% playlists.forEach(p => { %>
                       <label class="playlist-checkbox" data-name="<%= p.name.toLowerCase() %>">
                         <input type="checkbox" name="playlist_ids" value="<%= p.id %>" <%= link.playlist_ids.includes(p.id) ? 'checked' : '' %>>
-                        <span><%= p.name %> · <%= p.owner_name %></span>
+                        <div class="playlist-checkbox-text">
+                          <span class="checkbox-title"><%= p.name %></span>
+                          <span class="checkbox-meta">Propriétaire · <%= p.owner_name %> · créé le <%= new Date(p.created_at).toLocaleDateString('fr-FR') %></span>
+                        </div>
                       </label>
                     <% }) %>
                   </div>
