@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AudioBoard — Hors ligne</title>
+  <style>
+    body { background:#0f0f1a; color:#e2e8f0; font-family:system-ui,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+    .box { text-align:center; padding:2rem; }
+    h1 { font-size:1.5rem; margin-bottom:.5rem; }
+    .icon { font-size:4rem; margin:1rem 0; }
+    p { color:#94a3b8; margin:.5rem 0; }
+    button { margin-top:1.5rem; padding:.75rem 1.5rem; background:#6366f1; color:#fff; border:none; border-radius:.5rem; cursor:pointer; font-size:1rem; }
+    button:hover { background:#5558e8; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>AudioBoard</h1>
+    <div class="icon">📡</div>
+    <p>Vous êtes hors ligne.</p>
+    <p style="font-size:.875rem;">Les pistes déjà mises en cache restent disponibles dans le lecteur.</p>
+    <button onclick="location.reload()">Réessayer</button>
+  </div>
+</body>
+</html>
