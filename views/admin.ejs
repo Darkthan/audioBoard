@@ -141,15 +141,28 @@
             <p class="text-muted text-sm" style="margin:.25rem 0 0 1.4rem;">Les utilisateurs peuvent se connecter sans mot de passe avec leur appareil (Touch ID, Face ID, clé FIDO2…).</p>
           </div>
 
-          <div class="card-title" style="font-size:.85rem; margin:1rem 0 .5rem; color:var(--text-muted);">Configuration WebAuthn (optionnel — laisser vide pour utiliser le domaine actuel)</div>
+          <div class="card-title" style="font-size:.85rem; margin:1rem 0 .5rem; color:var(--text-muted);">Configuration WebAuthn</div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:.5rem;">
             <div class="form-group" style="margin:0;">
-              <label style="font-size:.8rem;">RP ID (domaine)</label>
-              <input type="text" name="webauthn_rp_id" class="form-control" value="<%= settings.webauthn_rp_id || '' %>" placeholder="example.com">
+              <label style="font-size:.8rem;">RP ID <span class="text-muted">(domaine)</span></label>
+              <input type="text" name="webauthn_rp_id" class="form-control" value="<%= settings.webauthn_rp_id || '' %>"
+                     placeholder="ex : audioboard.monentreprise.com">
+              <p class="text-muted text-sm" style="margin:.3rem 0 0;">
+                Le nom de domaine exact utilisé dans l'URL du navigateur (<strong>sans</strong> http:// ni port).<br>
+                Exemples&nbsp;: <code>audioboard.monentreprise.com</code>, <code>monserveur.local</code>, <code>localhost</code>.<br>
+                ⚠️ Les adresses IP ne sont pas acceptées par WebAuthn.<br>
+                <strong>Laisser vide</strong> = utilise automatiquement le domaine de la requête (recommandé si un seul domaine).
+              </p>
             </div>
             <div class="form-group" style="margin:0;">
-              <label style="font-size:.8rem;">RP Name (nom affiché)</label>
-              <input type="text" name="webauthn_rp_name" class="form-control" value="<%= settings.webauthn_rp_name || 'AudioBoard' %>" placeholder="AudioBoard">
+              <label style="font-size:.8rem;">RP Name <span class="text-muted">(nom affiché)</span></label>
+              <input type="text" name="webauthn_rp_name" class="form-control" value="<%= settings.webauthn_rp_name || 'AudioBoard' %>"
+                     placeholder="AudioBoard">
+              <p class="text-muted text-sm" style="margin:.3rem 0 0;">
+                Nom affiché par le navigateur lors de l'enregistrement ou de l'utilisation d'une clé d'accès.<br>
+                Exemple&nbsp;: <code>AudioBoard — Mon Entreprise</code>.<br>
+                Valeur par défaut&nbsp;: <code>AudioBoard</code>.
+              </p>
             </div>
           </div>
 
