@@ -740,6 +740,11 @@ tr:hover td { background: rgba(99, 102, 241, 0.05); }
   border: 1px solid rgba(239, 68, 68, 0.3);
   color: var(--danger);
 }
+.alert-success {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #16a34a;
+}
 .alert-info {
   background: rgba(59, 130, 246, 0.1);
   border: 1px solid rgba(59, 130, 246, 0.3);

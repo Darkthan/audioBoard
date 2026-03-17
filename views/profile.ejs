@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mon profil - AudioBoard</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <%- include('partials/navbar') %>
+
+  <div class="container" style="max-width:520px; padding-top:2.5rem; padding-bottom:3rem;">
+    <h1 style="font-size:1.4rem; margin-bottom:1.5rem;">Mon profil</h1>
+
+    <div class="card">
+      <div class="card-title">Changer le mot de passe</div>
+
+      <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+      <% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
+
+      <form method="POST" action="/profile/password">
+        <div class="form-group">
+          <label for="current_password">Mot de passe actuel</label>
+          <input type="password" id="current_password" name="current_password"
+                 class="form-control" required autocomplete="current-password">
+        </div>
+        <div class="form-group">
+          <label for="new_password">Nouveau mot de passe <span class="text-muted text-sm">(8 car. min.)</span></label>
+          <input type="password" id="new_password" name="new_password"
+                 class="form-control" required minlength="8" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+          <label for="confirm">Confirmer le nouveau mot de passe</label>
+          <input type="password" id="confirm" name="confirm"
+                 class="form-control" required minlength="8" autocomplete="new-password">
+        </div>
+        <button type="submit" class="btn btn-primary">Mettre à jour</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

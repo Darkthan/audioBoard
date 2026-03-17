@@ -183,8 +183,9 @@ const stmt = {
   getAdminExists:    db.prepare("SELECT id FROM users WHERE role='admin'"),
   getAllUsers:       db.prepare('SELECT id,username,role,email,created_at FROM users ORDER BY created_at'),
   insertUser:        db.prepare('INSERT INTO users (username,password,role,email) VALUES (?,?,?,?)'),
-  updateUserEmail:   db.prepare('UPDATE users SET email=? WHERE id=?'),
-  deleteUser:        db.prepare('DELETE FROM users WHERE id=?'),
+  updateUserEmail:    db.prepare('UPDATE users SET email=? WHERE id=?'),
+  updateUserPassword: db.prepare('UPDATE users SET password=? WHERE id=?'),
+  deleteUser:         db.prepare('DELETE FROM users WHERE id=?'),
 
   insertMagicToken:        db.prepare('INSERT INTO magic_tokens (user_id,token,expires_at) VALUES (?,?,?)'),
   getMagicToken:           db.prepare('SELECT id,user_id,expires_at FROM magic_tokens WHERE token=?'),
@@ -1101,11 +1102,37 @@ app.post('/admin/users/:id/update', requireAdmin, (req, res) => {
     return res.redirect('/admin?error=Email invalide');
   }
   const quota = parseInt(req.body.quota_mb, 10);
+  const newPassword = (req.body.new_password || '').trim();
+  if (newPassword && newPassword.length < 8) {
+    return res.redirect('/admin?error=Le mot de passe doit faire au moins 8 caractères');
+  }
   db.transaction(() => {
     stmt.updateUserEmail.run(email, userId);
     stmt.updateUserQuota.run(isNaN(quota) || quota <= 0 ? null : quota, userId);
+    if (newPassword) stmt.updateUserPassword.run(bcrypt.hashSync(newPassword, 10), userId);
   })();
   res.redirect('/admin');
+});
+
+// ── Profile ───────────────────────────────────────────────────────────────────
+app.get('/profile', requireAuth, (req, res) => {
+  res.render('profile', { error: null, success: null });
+});
+
+app.post('/profile/password', requireAuth, (req, res) => {
+  const render = (error, success) => res.render('profile', { error, success });
+  const current = (req.body.current_password || '').trim();
+  const newPwd  = (req.body.new_password   || '').trim();
+  const confirm = (req.body.confirm        || '').trim();
+  const user = stmt.getUserByUsername.get(req.session.user.username);
+  if (!bcrypt.compareSync(current, user.password))
+    return render('Mot de passe actuel incorrect.', null);
+  if (newPwd.length < 8)
+    return render('Le nouveau mot de passe doit faire au moins 8 caractères.', null);
+  if (newPwd !== confirm)
+    return render('Les mots de passe ne correspondent pas.', null);
+  stmt.updateUserPassword.run(bcrypt.hashSync(newPwd, 10), user.id);
+  render(null, 'Mot de passe mis à jour.');
 });
 
 app.post('/admin/users/:id/delete', requireAdmin, (req, res) => {
