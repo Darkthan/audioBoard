@@ -327,9 +327,34 @@ const defaults = {
   passwordless_enabled:'0',
   smtp_host:'', smtp_port:'587', smtp_secure:'0', smtp_user:'', smtp_pass:'', smtp_from:'',
   default_quota_mb: '0',
+  webauthn_enabled: '0',
+  webauthn_rp_id:   '',
+  webauthn_rp_name: 'AudioBoard',
 };
 const upsertIgnore = db.prepare('INSERT OR IGNORE INTO settings (key,value) VALUES (?,?)');
 for (const [k,v] of Object.entries(defaults)) upsertIgnore.run(k, v);
+
+// ── Variables d'environnement → paramètres DB (autoritatifs au démarrage) ──────
+const ENV_SETTINGS_MAP = {
+  compression_codec:    'COMPRESSION_CODEC',
+  compression_bitrate:  'COMPRESSION_BITRATE',
+  retention_days:       'RETENTION_DAYS',
+  webrtc_enabled:       'WEBRTC_ENABLED',
+  passwordless_enabled: 'PASSWORDLESS_ENABLED',
+  smtp_host:            'SMTP_HOST',
+  smtp_port:            'SMTP_PORT',
+  smtp_secure:          'SMTP_SECURE',
+  smtp_user:            'SMTP_USER',
+  smtp_pass:            'SMTP_PASS',
+  smtp_from:            'SMTP_FROM',
+  default_quota_mb:     'DEFAULT_QUOTA_MB',
+  webauthn_enabled:     'WEBAUTHN_ENABLED',
+  webauthn_rp_id:       'WEBAUTHN_RP_ID',
+  webauthn_rp_name:     'WEBAUTHN_RP_NAME',
+};
+for (const [key, envVar] of Object.entries(ENV_SETTINGS_MAP)) {
+  if (process.env[envVar] !== undefined) stmt.upsertSetting.run(key, process.env[envVar]);
+}
 
 // ── Initial admin setup ───────────────────────────────────────────────────────
 let setupDone = !!stmt.getAdminExists.get();
@@ -498,6 +523,7 @@ app.use((req, res, next) => {
   res.locals.user = req.session.user || null;
   res.locals.webrtcEnabled = getSetting('webrtc_enabled') !== '0';
   res.locals.passwordlessEnabled = getSetting('passwordless_enabled') === '1';
+  res.locals.webauthnEnabled = getSetting('webauthn_enabled') === '1';
   next();
 });
 
@@ -1162,21 +1188,23 @@ app.post('/profile/password', requireAuth, (req, res) => {
 
 // ── WebAuthn ──────────────────────────────────────────────────────────────────
 const getOrigin = req => `${req.protocol}://${req.get('host')}`;
+const getRpID   = req => getSetting('webauthn_rp_id') || req.hostname;
+const getRpName = ()  => getSetting('webauthn_rp_name') || 'AudioBoard';
 
 app.post('/profile/webauthn/register/start', requireAuth, async (req, res) => {
   try {
     const { id, username } = req.session.user;
     const existing = stmt.getWebAuthnCredsByUser.all(id);
     const options = await generateRegistrationOptions({
-      rpName: 'AudioBoard',
-      rpID: req.hostname,
+      rpName: getRpName(),
+      rpID: getRpID(req),
       userName: username,
       attestationType: 'none',
       excludeCredentials: existing.map(c => ({
         id: c.credential_id,
         transports: JSON.parse(c.transports || '[]'),
       })),
-      authenticatorSelection: { residentKey: 'discouraged', userVerification: 'preferred' },
+      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
     });
     req.session.webauthnRegChallenge = options.challenge;
     res.json(options);
@@ -1196,7 +1224,7 @@ app.post('/profile/webauthn/register/finish', requireAuth, async (req, res) => {
       response: registrationResponse,
       expectedChallenge,
       expectedOrigin: getOrigin(req),
-      expectedRPID: req.hostname,
+      expectedRPID: getRpID(req),
     });
     if (!verified || !registrationInfo) return res.status(400).json({ error: 'Vérification échouée' });
     const { credential } = registrationInfo;
@@ -1237,20 +1265,12 @@ app.post('/profile/webauthn/credentials/:id/delete', requireAuth, (req, res) => 
 
 app.post('/login/webauthn/start', async (req, res) => {
   try {
-    const username = (req.body.username || '').trim();
-    const user = stmt.getUserByUsername.get(username);
-    const allowCredentials = user
-      ? stmt.getWebAuthnCredsByUser.all(user.id).map(c => ({
-          id: c.credential_id,
-          transports: JSON.parse(c.transports || '[]'),
-        }))
-      : [];
     const options = await generateAuthenticationOptions({
-      rpID: req.hostname,
-      allowCredentials,
-      userVerification: 'preferred',
+      rpID: getRpID(req),
+      allowCredentials: [],
+      userVerification: 'required',
     });
-    req.session.webauthnAuthChallenge = { challenge: options.challenge, username };
+    req.session.webauthnAuthChallenge = { challenge: options.challenge };
     res.json(options);
   } catch (err) {
     console.error('WebAuthn auth start:', err);
@@ -1263,18 +1283,18 @@ app.post('/login/webauthn/finish', async (req, res) => {
   try {
     const sessionData = req.session.webauthnAuthChallenge;
     if (!sessionData) return fail();
-    const { challenge: expectedChallenge, username } = sessionData;
-    const user = stmt.getUserByUsername.get(username);
-    if (!user) return fail();
+    const { challenge: expectedChallenge } = sessionData;
     const assertionResponse = req.body;
     const credIdBuf = Buffer.from(assertionResponse.rawId, 'base64url');
     const cred = stmt.getWebAuthnCredByCredId.get(credIdBuf);
-    if (!cred || cred.user_id !== user.id) return fail();
+    if (!cred) return fail();
+    const user = stmt.getUserById.get(cred.user_id);
+    if (!user) return fail();
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
       response: assertionResponse,
       expectedChallenge,
       expectedOrigin: getOrigin(req),
-      expectedRPID: req.hostname,
+      expectedRPID: getRpID(req),
       credential: {
         id: Buffer.from(cred.credential_id).toString('base64url'),
         publicKey: new Uint8Array(cred.public_key),
@@ -1307,7 +1327,8 @@ app.post('/admin/playlists/:id/delete', requireAdmin, (req, res) => {
 
 app.post('/admin/settings', requireAdmin, (req, res) => {
   const { compression_codec, compression_bitrate, retention_days, webrtc_enabled,
-          passwordless_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from } = req.body;
+          passwordless_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from,
+          webauthn_enabled, webauthn_rp_id, webauthn_rp_name } = req.body;
   stmt.upsertSetting.run('compression_codec',   CODECS.includes(compression_codec) ? compression_codec : 'none');
   stmt.upsertSetting.run('compression_bitrate', compression_bitrate || '128');
   stmt.upsertSetting.run('retention_days',      retention_days || '30');
@@ -1319,6 +1340,9 @@ app.post('/admin/settings', requireAdmin, (req, res) => {
   stmt.upsertSetting.run('smtp_user',    (smtp_user  || '').trim());
   stmt.upsertSetting.run('smtp_pass',    smtp_pass  || '');
   stmt.upsertSetting.run('smtp_from',    (smtp_from  || '').trim());
+  stmt.upsertSetting.run('webauthn_enabled', webauthn_enabled === '1' ? '1' : '0');
+  stmt.upsertSetting.run('webauthn_rp_id',   (webauthn_rp_id   || '').trim());
+  stmt.upsertSetting.run('webauthn_rp_name', (webauthn_rp_name || 'AudioBoard').trim());
   res.redirect('/admin');
 });
 

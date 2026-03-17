@@ -19,13 +19,9 @@
         <div class="alert alert-info"><%= info %></div>
       <% } %>
 
+      <% if (locals.webauthnEnabled) { %>
       <!-- ── Clé d'accès (WebAuthn) ──────────────────────────────────────── -->
       <div id="webauthnSection" style="margin-bottom:1rem;">
-        <div class="form-group" style="margin-bottom:.5rem;">
-          <label for="waUsername">Nom d'utilisateur</label>
-          <input type="text" id="waUsername" class="form-control" autocomplete="username"
-                 placeholder="Votre identifiant">
-        </div>
         <button type="button" id="webauthnBtn" class="btn btn-secondary" style="width:100%; justify-content:center;">
           🔑 Se connecter avec une clé d'accès
         </button>
@@ -33,6 +29,7 @@
       </div>
 
       <div style="text-align:center; margin:.75rem 0; color:var(--text-muted); font-size:.85rem;">— ou —</div>
+      <% } %>
 
       <% if (locals.passwordlessEnabled) { %>
         <!-- ── Formulaire magic link ─────────────────────────────────── -->
@@ -118,17 +115,15 @@
     }
 
     document.getElementById('webauthnBtn')?.addEventListener('click', async () => {
-      const username = document.getElementById('waUsername').value.trim();
-      const errEl    = document.getElementById('waError');
+      const errEl = document.getElementById('waError');
       errEl.style.display = 'none';
 
-      if (!username) { errEl.textContent = 'Entrez votre nom d\'utilisateur.'; errEl.style.display = ''; return; }
       if (!window.PublicKeyCredential) { errEl.textContent = 'Navigateur non supporté.'; errEl.style.display = ''; return; }
 
       try {
         const optsRes = await fetch('/login/webauthn/start', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username }),
+          body: '{}',
         });
         const opts = await optsRes.json();
         if (opts.error) { errEl.textContent = opts.error; errEl.style.display = ''; return; }
@@ -166,13 +161,6 @@
       }
     });
 
-    // Sync du champ username vers le champ WebAuthn
-    document.querySelectorAll('input[name="username"]').forEach(inp => {
-      inp.addEventListener('input', () => {
-        const waInput = document.getElementById('waUsername');
-        if (waInput && !waInput.value) waInput.value = inp.value;
-      });
-    });
   </script>
 </body>
 </html>
