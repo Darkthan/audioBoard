@@ -21,40 +21,6 @@
       <div class="stat-card"><div class="stat-value"><%= stats.playsToday %></div><div class="stat-label">Écoutes aujourd'hui</div></div>
     </div>
 
-    <% if (stats.topTracks && stats.topTracks.length) { %>
-    <div class="card" style="margin-bottom:1.5rem;">
-      <div class="card-title">Top pistes (30 jours)</div>
-      <table>
-        <thead><tr><th>#</th><th>Piste</th><th>Écoutes</th></tr></thead>
-        <tbody>
-          <% stats.topTracks.forEach((t, i) => { %>
-          <tr>
-            <td class="text-muted"><%= i+1 %></td>
-            <td><%= t.original_name %></td>
-            <td><%= t.plays %></td>
-          </tr>
-          <% }) %>
-        </tbody>
-      </table>
-    </div>
-    <% } %>
-
-    <% if (stats.playsPerDay && stats.playsPerDay.length) { %>
-    <div class="card" style="margin-bottom:1.5rem;">
-      <div class="card-title">Écoutes par jour (14 derniers jours)</div>
-      <div style="display:flex; align-items:flex-end; gap:4px; height:80px; padding-top:.5rem;">
-        <% const maxPlays = Math.max(...stats.playsPerDay.map(d => d.plays), 1);
-           stats.playsPerDay.forEach(d => {
-             const h = Math.max(4, Math.round(d.plays / maxPlays * 72));
-        %>
-        <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;" title="<%= d.day %> : <%= d.plays %>">
-          <div style="width:100%; height:<%= h %>px; background:var(--primary); border-radius:2px 2px 0 0; opacity:.8;"></div>
-          <div style="font-size:.55rem; color:var(--text-muted); writing-mode:vertical-rl; transform:rotate(180deg); height:36px; overflow:hidden;"><%= d.day.slice(5) %></div>
-        </div>
-        <% }) %>
-      </div>
-    </div>
-    <% } %>
 
     <!-- Paramètres -->
     <div class="card" style="margin-bottom:1.5rem;">
@@ -199,13 +165,12 @@
                  const quotaMb = u.quota_mb || 0;
                  const pct = quotaMb > 0 ? Math.min(100, Math.round(u.storage_used / (quotaMb * 1048576) * 100)) : 0;
               %>
-                <tr>
+                <tr class="admin-user-row" data-user-row>
                   <td><%= u.username %></td>
                   <td>
-                    <form method="POST" action="/admin/users/<%= u.id %>/email" class="admin-cell-form">
+                    <form id="user-update-<%= u.id %>" method="POST" action="/admin/users/<%= u.id %>/update" class="admin-cell-form">
                       <input type="email" name="email" value="<%= u.email || '' %>" placeholder="—"
-                             class="form-control admin-cell-input" style="font-size:.8rem; padding:.2rem .5rem; height:auto; min-width:160px;">
-                      <button type="submit" class="btn btn-secondary btn-sm" style="white-space:nowrap;">OK</button>
+                             class="form-control admin-cell-input user-edit-field" style="font-size:.8rem; padding:.2rem .5rem; height:auto; min-width:160px;" disabled>
                     </form>
                   </td>
                   <td><span class="badge badge-<%= u.role %>"><%= u.role %></span></td>
@@ -218,14 +183,15 @@
                     <% } %>
                   </td>
                   <td>
-                    <form method="POST" action="/admin/users/<%= u.id %>/quota" class="admin-cell-form">
+                    <div class="admin-cell-form">
                       <input type="number" name="quota_mb" value="<%= quotaMb || '' %>" placeholder="∞" min="1"
-                             class="form-control admin-cell-input admin-cell-input-small" style="font-size:.8rem; padding:.2rem .5rem; height:auto; width:80px;">
-                      <button type="submit" class="btn btn-secondary btn-sm">OK</button>
-                    </form>
+                             class="form-control admin-cell-input admin-cell-input-small user-edit-field" style="font-size:.8rem; padding:.2rem .5rem; height:auto; width:80px;" form="user-update-<%= u.id %>" disabled>
+                    </div>
                   </td>
                   <td class="text-muted"><%= new Date(u.created_at).toLocaleDateString('fr-FR') %></td>
                   <td>
+                    <button type="button" class="icon-btn user-edit-btn" data-user-edit aria-label="Modifier l'utilisateur">✎</button>
+                    <button type="submit" class="btn btn-secondary btn-sm user-save-btn" form="user-update-<%= u.id %>" hidden>Enregistrer</button>
                     <% if (u.id !== user.id) { %>
                       <form method="POST" action="/admin/users/<%= u.id %>/delete" style="display:inline;"
                             onsubmit="return confirm('Supprimer cet utilisateur et toutes ses playlists ?')">
@@ -382,6 +348,33 @@
         item.classList.toggle('shared-link-card--editing');
         if (item.classList.contains('shared-link-card--editing')) {
           form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
+    let currentEditingRow = null;
+    document.querySelectorAll('[data-user-edit]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('[data-user-row]');
+        if (!row) return;
+        const isEditing = row !== currentEditingRow;
+
+        if (currentEditingRow && currentEditingRow !== row) {
+          currentEditingRow.classList.remove('admin-user-row--editing');
+          currentEditingRow.querySelectorAll('.user-edit-field').forEach(f => { f.disabled = true; });
+          const prevSave = currentEditingRow.querySelector('.user-save-btn');
+          if (prevSave) prevSave.hidden = true;
+        }
+
+        row.classList.toggle('admin-user-row--editing', isEditing);
+        row.querySelectorAll('.user-edit-field').forEach(f => { f.disabled = !isEditing; });
+        const saveBtn = row.querySelector('.user-save-btn');
+        if (saveBtn) saveBtn.hidden = !isEditing;
+        btn.setAttribute('aria-pressed', String(isEditing));
+        currentEditingRow = isEditing ? row : null;
+
+        if (isEditing) {
+          const first = row.querySelector('.user-edit-field');
+          if (first) { first.focus(); first.select(); }
         }
       });
     });

@@ -13,11 +13,15 @@ const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
 const ROLES = { ADMIN: 'admin', UPLOADER: 'uploader' };
 
 // ── Database ──────────────────────────────────────────────────────────────────
-const db = new Database(path.join(__dirname, 'data', 'audioboard.db'));
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const db = new Database(path.join(DATA_DIR, 'audioboard.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -1056,14 +1060,17 @@ app.post('/admin/users', requireAdmin, (req, res) => {
   res.redirect('/admin');
 });
 
-app.post('/admin/users/:id/email', requireAdmin, (req, res) => {
-  stmt.updateUserEmail.run((req.body.email || '').trim() || null, parseInt(req.params.id, 10));
-  res.redirect('/admin');
-});
-
-app.post('/admin/users/:id/quota', requireAdmin, (req, res) => {
+app.post('/admin/users/:id/update', requireAdmin, (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  const email = (req.body.email || '').trim() || null;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.redirect('/admin?error=Email invalide');
+  }
   const quota = parseInt(req.body.quota_mb, 10);
-  stmt.updateUserQuota.run(isNaN(quota) || quota <= 0 ? null : quota, parseInt(req.params.id, 10));
+  db.transaction(() => {
+    stmt.updateUserEmail.run(email, userId);
+    stmt.updateUserQuota.run(isNaN(quota) || quota <= 0 ? null : quota, userId);
+  })();
   res.redirect('/admin');
 });
 

@@ -1,0 +1,20 @@
+services:
+  audioboard:
+    build:
+      context: .
+    container_name: audioboard
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      SESSION_SECRET: "${SESSION_SECRET:-change-me-in-production}"
+      DATA_DIR: /app/data
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - audioboard_data:/app/data
+      - audioboard_uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  audioboard_data:
+  audioboard_uploads:

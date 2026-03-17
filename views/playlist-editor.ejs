@@ -109,8 +109,8 @@
               </button>
               <span class="track-num"><%= idx + 1 %></span>
               <div class="track-info">
-                <span class="track-name"><%= f.title_tag || f.original_name.replace(/\.[^.]+$/, '') %></span>
-                <form method="POST" action="/files/<%= f.id %>/rename" style="display:flex; gap:.35rem; align-items:center; margin-top:.35rem; flex-wrap:wrap;">
+                <span class="track-name track-name-editable" title="Cliquer pour renommer"><%= f.title_tag || f.original_name.replace(/\.[^.]+$/, '') %></span>
+                <form method="POST" action="/files/<%= f.id %>/rename" class="rename-form" style="display:none; gap:.35rem; align-items:center; margin-top:.35rem; flex-wrap:wrap;">
                   <input
                     type="text"
                     name="title"
@@ -120,6 +120,7 @@
                     style="max-width:280px; font-size:.8rem; padding:.35rem .6rem;"
                   >
                   <button type="submit" class="btn btn-secondary btn-sm">OK</button>
+                  <button type="button" class="btn btn-sm rename-cancel" style="background:var(--surface-hover);">✕</button>
                 </form>
                 <span class="track-meta">
                   <% if (f.duration) { %><%= Math.floor(f.duration/60) %>:<%= String(Math.floor(f.duration%60)).padStart(2,'0') %> · <% } %>
@@ -277,6 +278,24 @@
       });
       xhr.addEventListener('error', () => { alert('Erreur réseau'); bar.style.display = 'none'; submitBtn.disabled = false; });
       xhr.open('POST', '/upload'); xhr.send(fd);
+    });
+
+    // ── Inline rename ─────────────────────────────────────────────────────────
+    document.querySelectorAll('.track-name-editable').forEach(span => {
+      span.addEventListener('click', () => {
+        const form = span.closest('.track-info').querySelector('.rename-form');
+        span.style.display = 'none';
+        form.style.display = 'flex';
+        form.querySelector('input').select();
+      });
+    });
+    document.querySelectorAll('.rename-cancel').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const form = btn.closest('.rename-form');
+        const span = form.closest('.track-info').querySelector('.track-name-editable');
+        form.style.display = 'none';
+        span.style.display = '';
+      });
     });
 
     // ── Drag & drop reorder ───────────────────────────────────────────────────
