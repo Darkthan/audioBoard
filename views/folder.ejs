@@ -83,7 +83,7 @@
                 <div class="name"><%= f.original_name %></div>
                 <div class="meta">
                   <%= (f.size / 1024 / 1024).toFixed(1) %> Mo
-                  <% if (f.compressed) { %>&nbsp;·&nbsp;<span class="badge badge-compressed">MP3</span><% } %>
+                  <% if (f.compressed) { %>&nbsp;·&nbsp;<span class="badge badge-compressed"><%= (f.codec||'mp3').replace('_live','').toUpperCase() %></span><% } %>
                 </div>
               </div>
               <a href="/listen/<%= f.share_token %>" class="play-btn" target="_blank">Écouter</a>

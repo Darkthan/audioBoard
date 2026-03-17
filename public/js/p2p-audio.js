@@ -70,6 +70,7 @@
       });
     } catch { return []; }
   }
+  const metaKey = token => `meta:${token}`;
 
   // ── In-memory chunk store (session) ──────────────────────────────────────
   class MemStore {
@@ -242,8 +243,10 @@
 
   // ── Loader (mem cache → peers → HTTP) ────────────────────────────────────
   class Loader {
-    constructor(token) {
+    constructor(token, streamUrl, allowSwarm) {
       this.token  = token;
+      this.streamUrl = streamUrl;
+      this.allowSwarm = allowSwarm !== false;
       this.mem    = new MemStore();
       this.swarm  = null;
       this.size   = 0;
@@ -253,13 +256,28 @@
 
     async init() {
       try {
-        const r = await fetch(`/stream/${this.token}`, { method: 'HEAD' });
+        const r = await fetch(this.streamUrl, { method: 'HEAD' });
         this.size  = parseInt(r.headers.get('content-length') || '0');
         this.total = Math.ceil(this.size / CHUNK);
+        if (this.size > 0) {
+          idbSet(metaKey(this.token), {
+            size: this.size,
+            total: this.total,
+            streamUrl: this.streamUrl,
+          });
+        }
         if (!this.size) return false;
-      } catch { return false; }
+      } catch {
+        const meta = await idbGet(metaKey(this.token));
+        if (meta?.size > 0 && meta?.total > 0) {
+          this.size = meta.size;
+          this.total = meta.total;
+          return true;
+        }
+        return false;
+      }
 
-      if (window.AB_WEBRTC !== false && typeof RTCPeerConnection !== 'undefined') {
+      if (this.allowSwarm && window.AB_WEBRTC !== false && typeof RTCPeerConnection !== 'undefined') {
         this.swarm = new Swarm(this.token, this.mem);
         try { this.swarm.connect(); } catch {}
       }
@@ -285,7 +303,7 @@
       // 4. HTTP
       const start = idx * CHUNK;
       const end   = Math.min(start + CHUNK - 1, this.size - 1);
-      const r   = await fetch(`/stream/${this.token}`, { headers: { Range: `bytes=${start}-${end}` } });
+      const r   = await fetch(this.streamUrl, { headers: { Range: `bytes=${start}-${end}` } });
       const buf = await r.arrayBuffer();
       this.mem.set(idx, buf);
       idbSet(`${this.token}:${idx}`, buf); // persist async
@@ -302,7 +320,11 @@
   // ── P2PAudio public API ───────────────────────────────────────────────────
   let _current = null; // { token, loader }
 
-  async function load(token, audioEl) {
+  async function load(token, audioEl, options = {}) {
+    const streamUrl = options.streamUrl || `/stream/${token}`;
+    const mime = options.mime || 'audio/mpeg';
+    const p2pEnabled = options.p2p !== false;
+
     // Abort previous background loader
     if (_current && _current.token !== token) {
       _current.loader.abort();
@@ -311,7 +333,7 @@
 
     // Check if fully cached in IDB → instant Blob URL play
     try {
-      const loader = new Loader(token);
+      const loader = new Loader(token, streamUrl, p2pEnabled);
       const headOk = await loader.init();
       if (headOk && loader.total > 0) {
         const allChunks = await idbGetAll(token);
@@ -324,25 +346,27 @@
             ordered.push(b);
           }
           if (ordered.length === loader.total) {
-            const blob = new Blob(ordered, { type: 'audio/mpeg' });
+            const blob = new Blob(ordered, { type: mime });
             audioEl.src = URL.createObjectURL(blob);
             audioEl.load();
             loader.abort();
-            // Still connect to swarm to serve peers
-            const servLoader = new Loader(token);
-            await servLoader.init();
-            // Pre-fill memory from IDB
-            for (let i = 0; i < servLoader.total; i++) {
-              const b = await idbGet(`${token}:${i}`);
-              if (b) servLoader.mem.set(i, b);
+            if (p2pEnabled) {
+              // Still connect to swarm to serve peers
+              const servLoader = new Loader(token, streamUrl, true);
+              await servLoader.init();
+              // Pre-fill memory from IDB
+              for (let i = 0; i < servLoader.total; i++) {
+                const b = await idbGet(`${token}:${i}`);
+                if (b) servLoader.mem.set(i, b);
+              }
+              _current = { token, loader: servLoader };
             }
-            _current = { token, loader: servLoader };
             return;
           }
         }
 
-        // Not fully cached: HTTP stream + background P2P download
-        audioEl.src = `/stream/${token}`;
+        // Not fully cached: HTTP stream + background chunk download
+        audioEl.src = streamUrl;
         audioEl.load();
         _current = { token, loader };
         _bgDownload(loader).catch(() => {});
@@ -351,7 +375,7 @@
     } catch {}
 
     // Total fallback
-    audioEl.src = `/stream/${token}`;
+    audioEl.src = streamUrl;
     audioEl.load();
   }
 

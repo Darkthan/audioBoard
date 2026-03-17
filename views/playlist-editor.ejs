@@ -109,11 +109,22 @@
               </button>
               <span class="track-num"><%= idx + 1 %></span>
               <div class="track-info">
-                <span class="track-name"><%= f.original_name %></span>
+                <span class="track-name"><%= f.title_tag || f.original_name.replace(/\.[^.]+$/, '') %></span>
+                <form method="POST" action="/files/<%= f.id %>/rename" style="display:flex; gap:.35rem; align-items:center; margin-top:.35rem; flex-wrap:wrap;">
+                  <input
+                    type="text"
+                    name="title"
+                    class="form-control"
+                    value="<%= f.title_tag || f.original_name.replace(/\.[^.]+$/, '') %>"
+                    placeholder="Nom de la piste"
+                    style="max-width:280px; font-size:.8rem; padding:.35rem .6rem;"
+                  >
+                  <button type="submit" class="btn btn-secondary btn-sm">OK</button>
+                </form>
                 <span class="track-meta">
                   <% if (f.duration) { %><%= Math.floor(f.duration/60) %>:<%= String(Math.floor(f.duration%60)).padStart(2,'0') %> · <% } %>
                   <%= (f.size/1048576).toFixed(1) %> Mo
-                  <% if (f.compressed) { %> · <span class="badge badge-compressed">MP3</span><% } %>
+                  <% if (f.compressed) { %> · <span class="badge badge-compressed"><%= (f.codec||'mp3').replace('_live','').toUpperCase() %></span><% } %>
                   <% if (f.expires_at) { %> · Expire le <%= new Date(f.expires_at).toLocaleDateString('fr-FR') %><% } %>
                 </span>
               </div>
@@ -177,7 +188,7 @@
     // ── Register tracks for the player ───────────────────────────────────────
     scRegisterTracks([
       <% files.forEach((f, i) => { %>
-        { token: '<%= f.share_token %>', name: '<%= (f.title_tag || f.original_name).replace(/'/g, "\\'").replace(/\.[^.]+$/,'') %>', playlistName: '<%= playlist.name.replace(/'/g, "\\'") %>'<% if (f.artist) { %>, artist: '<%= f.artist.replace(/'/g, "\\'") %>'<% } %> }<%= i < files.length - 1 ? ',' : '' %>
+        { token: '<%= f.share_token %>', name: '<%= (f.title_tag || f.original_name).replace(/'/g, "\\'").replace(/\.[^.]+$/,'') %>', playlistName: '<%= playlist.name.replace(/'/g, "\\'") %>', codec: '<%= f.codec || "none" %>'<% if (f.artist) { %>, artist: '<%= f.artist.replace(/'/g, "\\'") %>'<% } %> }<%= i < files.length - 1 ? ',' : '' %>
       <% }) %>
     ]);
 

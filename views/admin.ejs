@@ -56,26 +56,49 @@
     </div>
     <% } %>
 
-    <div class="admin-grid">
-      <!-- Paramètres -->
-      <div class="card">
-        <div class="card-title">Paramètres</div>
+    <!-- Paramètres -->
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-title">Paramètres</div>
         <form method="POST" action="/admin/settings">
           <div class="form-group">
             <label>Codec de compression</label>
             <div style="display:flex; flex-direction:column; gap:.5rem; margin-top:.25rem;">
               <% [
-                  { val:'none',     label:'Aucun — fichier original conservé' },
-                  { val:'mp3',      label:'MP3 — compatibilité universelle' },
-                  { val:'aac',      label:'AAC — bonne qualité, compatible iOS/Safari, cache P2P' },
-                  { val:'opus',     label:'Opus — meilleure qualité/taille, cache P2P (pré-encodé)' },
-                  { val:'opus_live',label:'Opus live — transcoding à la volée (sans cache P2P)' },
+                  {
+                    val:'none',
+                    label:'Aucun — fichier original conservé',
+                    info:'Le serveur garde le fichier tel quel et le diffuse sans conversion. A utiliser si vous voulez preserver strictement la source ou eviter toute charge CPU.'
+                  },
+                  {
+                    val:'mp3',
+                    label:'MP3 — compatibilité universelle',
+                    info:'Le serveur convertit le fichier en MP3 des l\'upload. Bon choix si vous voulez la lecture la plus simple possible sur presque tous les appareils.'
+                  },
+                  {
+                    val:'aac',
+                    label:'AAC — bonne qualité, compatible iOS/Safari, cache P2P',
+                    info:'Le serveur encode en AAC a l\'upload. Bon compromis si vous voulez un format moderne, tres compatible web/mobile et partageable en cache P2P.'
+                  },
+                  {
+                    val:'opus',
+                    label:'Opus — meilleure qualité/taille, cache P2P (pré-encodé)',
+                    info:'Le serveur stocke uniquement une version Opus pre-encodee. A privilegier pour reduire la taille et activer le P2P, avec fallback MP3 live sur les appareils non compatibles.'
+                  },
+                  {
+                    val:'opus_live',
+                    label:'Opus live — transcoding à la volée (sans cache P2P)',
+                    info:'Le serveur conserve la source puis reencode en Opus a chaque lecture. Utile pour economiser le stockage, mais plus couteux pour le serveur et sans cache P2P.'
+                  },
                 ].forEach(c => { %>
                 <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
                   <input type="radio" name="compression_codec" value="<%= c.val %>"
                          <%= (settings.compression_codec||'mp3')===c.val?'checked':'' %>
                          onchange="updateBitrates(this.value)">
-                  <%= c.label %>
+                  <span><%= c.label %></span>
+                  <span class="info-dot" tabindex="0" aria-label="Informations sur <%= c.label %>">
+                    i
+                    <span class="info-tooltip"><%= c.info %></span>
+                  </span>
                 </label>
               <% }) %>
             </div>
@@ -143,10 +166,11 @@
           </div>
           <button type="submit" class="btn btn-primary">Sauvegarder</button>
         </form>
-      </div>
+    </div>
 
+    <div class="admin-grid">
       <!-- Utilisateurs -->
-      <div class="card">
+      <div class="card" style="grid-column: 1 / -1;">
         <div class="card-title">Utilisateurs</div>
         <form method="POST" action="/admin/users" class="inline-form" style="margin-bottom:1rem;">
           <div class="form-group">
@@ -214,6 +238,71 @@
         </table>
       </div>
 
+      <div class="card shared-links-section span-full">
+        <div class="card-title">Liens permanents multi-playlists</div>
+        <form method="POST" action="/admin/shared-links" class="shared-link-create vertical">
+          <div class="form-group">
+            <label for="shared_link_name">Nom du lien</label>
+            <input type="text" id="shared_link_name" name="name" class="form-control" placeholder="Ex. Médiathèque clients" required>
+          </div>
+          <div class="form-group">
+            <label for="shared_link_filter">Filtrer les playlists</label>
+            <input type="text" id="shared_link_filter" class="form-control shared-playlist-filter" placeholder="Rechercher par nom">
+          </div>
+          <div class="form-group">
+            <label class="text-muted text-sm">Sélection des playlists</label>
+            <div class="playlist-checkboxes multi-select">
+              <% playlists.forEach(p => { %>
+                <label class="playlist-checkbox" data-name="<%= p.name.toLowerCase() %>">
+                  <input type="checkbox" name="playlist_ids" value="<%= p.id %>">
+                  <div class="playlist-checkbox-text">
+                    <span class="checkbox-title"><%= p.name %></span>
+                    <span class="checkbox-meta">Propriétaire · <%= p.owner_name %> · créé le <%= new Date(p.created_at).toLocaleDateString('fr-FR') %></span>
+                  </div>
+                </label>
+              <% }) %>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm create-link-btn">Créer le lien</button>
+        </form>
+
+        <% if (!sharedLinks.length) { %>
+          <p class="text-muted">Aucun lien permanent créé pour l'instant.</p>
+        <% } else { %>
+          <div class="shared-link-list">
+            <% sharedLinks.forEach(link => { %>
+              <div class="shared-link-list-item">
+                <div>
+                  <div class="card-title" style="margin-bottom:.25rem;"><%= link.name %></div>
+                  <p class="text-muted text-sm" style="margin:0;">
+                    <%= link.playlists.length %> playlist<%= link.playlists.length !== 1 ? 's' : '' %> · créé le <%= new Date(link.created_at).toLocaleDateString('fr-FR') %>
+                  </p>
+                  <p class="text-muted text-sm link-token">/l/<%= link.token %></p>
+                </div>
+                <div class="shared-link-actions">
+                  <button type="button" class="copy-btn" onclick="copySharedLink('<%= link.token %>')">Copier</button>
+                  <button type="button" class="icon-btn edit-link-btn" data-target="link-<%= link.id %>">✎</button>
+                  <form method="POST" action="/admin/shared-links/<%= link.id %>/delete" onsubmit="return confirm('Supprimer ce lien permanent ?')">
+                    <button type="submit" class="btn btn-danger btn-sm">Suppr.</button>
+                  </form>
+                </div>
+                <form method="POST" action="/admin/shared-links/<%= link.id %>/update" class="shared-link-form" id="link-<%= link.id %>">
+                  <div class="playlist-checkboxes multi-select">
+                    <% playlists.forEach(p => { %>
+                      <label class="playlist-checkbox" data-name="<%= p.name.toLowerCase() %>">
+                        <input type="checkbox" name="playlist_ids" value="<%= p.id %>" <%= link.playlist_ids.includes(p.id) ? 'checked' : '' %>>
+                        <span><%= p.name %> · <%= p.owner_name %></span>
+                      </label>
+                    <% }) %>
+                  </div>
+                  <button type="submit" class="btn btn-primary btn-sm">Sauvegarder</button>
+                </form>
+              </div>
+            <% }) %>
+          </div>
+        <% } %>
+      </div>
+
       <!-- Toutes les playlists -->
       <div class="card" style="grid-column: 1 / -1;">
         <div class="card-title">Toutes les playlists</div>
@@ -262,6 +351,34 @@
     function copyPlaylistLink(token) {
       navigator.clipboard.writeText(location.origin + '/playlist/' + token).then(() => alert('Lien copié !'));
     }
+    function copySharedLink(token) {
+      navigator.clipboard.writeText(location.origin + '/l/' + token).then(() => alert('Lien copié !'));
+    }
+    const filterInput = document.querySelector('.shared-playlist-filter');
+    const playlistLabels = document.querySelectorAll('.playlist-checkbox');
+    function applyPlaylistFilter(term) {
+      playlistLabels.forEach(label => {
+        const matches = !term || label.dataset.name.includes(term);
+        label.style.display = matches ? '' : 'none';
+      });
+    }
+    if (filterInput) {
+      filterInput.addEventListener('input', () => {
+        applyPlaylistFilter(filterInput.value.trim().toLowerCase());
+      });
+    }
+    document.querySelectorAll('.edit-link-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const item = btn.closest('.shared-link-list-item');
+        if (!item) return;
+        const form = item.querySelector('.shared-link-form');
+        if (!form) return;
+        item.classList.toggle('shared-link-card--editing');
+        if (item.classList.contains('shared-link-card--editing')) {
+          form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
 
     const OPUS_BR = ['32','48','64','96','128','160','192'];
     const BITRATES = {

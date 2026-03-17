@@ -50,7 +50,7 @@
   <script>
     scRegisterTracks([
       <% files.forEach((f, i) => { %>
-        { token: '<%= f.share_token %>', name: '<%= (f.title_tag || f.original_name).replace(/'/g, "\\'").replace(/\.[^.]+$/,'') %>', playlistName: '<%= playlist.name.replace(/'/g, "\\'") %>'<% if (f.artist) { %>, artist: '<%= f.artist.replace(/'/g, "\\'") %>'<% } %> }<%= i < files.length - 1 ? ',' : '' %>
+        { token: '<%= f.share_token %>', name: '<%= (f.title_tag || f.original_name).replace(/'/g, "\\'").replace(/\.[^.]+$/,'') %>', playlistName: '<%= playlist.name.replace(/'/g, "\\'") %>', codec: '<%= f.codec || "none" %>'<% if (f.artist) { %>, artist: '<%= f.artist.replace(/'/g, "\\'") %>'<% } %> }<%= i < files.length - 1 ? ',' : '' %>
       <% }) %>
     ]);
 

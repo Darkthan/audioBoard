@@ -65,6 +65,19 @@ db.exec(`
     expires_at DATETIME NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS shared_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS shared_link_playlists (
+    shared_link_id INTEGER NOT NULL REFERENCES shared_links(id) ON DELETE CASCADE,
+    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    PRIMARY KEY (shared_link_id, playlist_id)
+  );
 `);
 
 db.exec(`
@@ -149,6 +162,8 @@ db.exec(`
     played_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  db.exec('CREATE INDEX IF NOT EXISTS idx_shared_link_playlists_playlist ON shared_link_playlists(playlist_id)');
+
   // Covers directory
   fs.mkdirSync(path.join(UPLOADS_DIR, 'covers'), { recursive: true });
 })();
@@ -188,6 +203,28 @@ const stmt = {
   renamePlaylist:          db.prepare('UPDATE playlists SET name=? WHERE id=?'),
   deletePlaylist:          db.prepare('DELETE FROM playlists WHERE id=?'),
   setPlaylistShareToken:   db.prepare('UPDATE playlists SET share_token=? WHERE id=?'),
+  getAllSharedLinks:       db.prepare(`
+    SELECT sl.id, sl.name, sl.token, sl.created_at, COUNT(slp.playlist_id) as playlist_count
+    FROM shared_links sl
+    LEFT JOIN shared_link_playlists slp ON slp.shared_link_id = sl.id
+    GROUP BY sl.id
+    ORDER BY sl.created_at DESC
+  `),
+  insertSharedLink:        db.prepare('INSERT INTO shared_links (name, token) VALUES (?, ?)'),
+  insertSharedLinkPlaylist: db.prepare('INSERT INTO shared_link_playlists (shared_link_id, playlist_id) VALUES (?, ?)'),
+  getSharedLinkById:       db.prepare('SELECT id, name, token FROM shared_links WHERE id = ?'),
+  getSharedLinkByToken:    db.prepare('SELECT id, name, token FROM shared_links WHERE token = ?'),
+  getSharedLinkPlaylists:  db.prepare(`
+    SELECT p.id, p.name, p.share_token, p.allow_download, COUNT(af.id) as file_count
+    FROM shared_link_playlists slp
+    JOIN playlists p ON p.id = slp.playlist_id
+    LEFT JOIN audio_files af ON af.playlist_id = p.id
+    WHERE slp.shared_link_id = ?
+    GROUP BY p.id
+    ORDER BY p.name
+  `),
+  deleteSharedLink:        db.prepare('DELETE FROM shared_links WHERE id = ?'),
+  deleteSharedLinkPlaylists: db.prepare('DELETE FROM shared_link_playlists WHERE shared_link_id = ?'),
 
   getFileById:                db.prepare('SELECT id,filename,uploaded_by,playlist_id FROM audio_files WHERE id=?'),
   getFileByToken:             db.prepare('SELECT filename,expires_at,codec FROM audio_files WHERE share_token=?'),
@@ -213,6 +250,7 @@ const stmt = {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
   `),
   updateFilePosition:    db.prepare('UPDATE audio_files SET position=? WHERE id=? AND playlist_id=?'),
+  updateFileTitle:       db.prepare('UPDATE audio_files SET title_tag=? WHERE id=?'),
   deleteFile:            db.prepare('DELETE FROM audio_files WHERE id=?'),
   deleteFilesByPlaylist: db.prepare('DELETE FROM audio_files WHERE playlist_id=?'),
   countFiles:  db.prepare('SELECT COUNT(*) as c FROM audio_files'),
@@ -350,6 +388,15 @@ function deletePlaylist(id) {
 
 const reorderPlaylist = db.transaction((playlistId, orderedIds) => {
   orderedIds.forEach((id, i) => stmt.updateFilePosition.run(i, id, playlistId));
+});
+
+const createSharedLinkWithPlaylists = db.transaction((name, playlistIds) => {
+  const token = uuidv4();
+  const result = stmt.insertSharedLink.run(name, token);
+  for (const playlistId of playlistIds) {
+    stmt.insertSharedLinkPlaylist.run(result.lastInsertRowid, playlistId);
+  }
+  return { id: result.lastInsertRowid, token };
 });
 
 // ── Multer ────────────────────────────────────────────────────────────────────
@@ -540,6 +587,20 @@ app.post('/playlists/:id/reorder', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/files/:id/rename', requireAuth, (req, res) => {
+  const file = stmt.getFileById.get(req.params.id);
+  if (!file) return res.status(404).render('error', { message:'Piste introuvable', user: req.session.user });
+
+  const playlist = file.playlist_id ? stmt.getPlaylistById.get(file.playlist_id) : null;
+  if (!playlist || !canManage(req.session.user, playlist)) {
+    return res.status(403).render('error', { message:'Non autorisé', user: req.session.user });
+  }
+
+  const title = (req.body.title || '').trim();
+  stmt.updateFileTitle.run(title || null, file.id);
+  res.redirect('/playlists/' + playlist.id);
+});
+
 // ── Playlist editor page ──────────────────────────────────────────────────────
 app.get('/playlists/:id', requireAuth, (req, res) => {
   const playlist = stmt.getPlaylistFull.get(req.params.id) || stmt.getPlaylistById.get(req.params.id);
@@ -554,6 +615,47 @@ app.get('/playlists/:id', requireAuth, (req, res) => {
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 const CODEC_MIME = { none: 'audio/mpeg', mp3: 'audio/mpeg', aac: 'audio/aac', opus: 'audio/webm', opus_live: 'audio/webm' };
+
+function streamStaticFile(req, res, filePath, mime) {
+  let stat;
+  try { stat = fs.statSync(filePath); } catch { return res.status(404).send('File missing'); }
+
+  const range = req.headers.range;
+  if (range) {
+    const [s, e] = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(s, 10);
+    const end = e ? parseInt(e, 10) : stat.size - 1;
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': end - start + 1,
+      'Content-Type': mime,
+    });
+    fs.createReadStream(filePath, { start, end }).pipe(res);
+    return;
+  }
+
+  res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': mime });
+  fs.createReadStream(filePath).pipe(res);
+}
+
+function streamLiveMp3(req, res, filePath, bitrate) {
+  res.set({
+    'Content-Type': 'audio/mpeg',
+    'Transfer-Encoding': 'chunked',
+    'Cache-Control': 'no-store',
+  });
+
+  const proc = ffmpeg(filePath)
+    .audioCodec('libmp3lame')
+    .audioChannels(2)
+    .audioBitrate(bitrate)
+    .format('mp3')
+    .on('error', () => res.end())
+    .pipe(res, { end: true });
+
+  req.on('close', () => proc?.kill?.());
+}
 
 async function persistFile(file, playlistId, userId, options) {
   const shareToken = uuidv4();
@@ -702,10 +804,20 @@ app.get('/stream/:token', (req, res) => {
   if (!file) return res.status(404).send('Not found');
   if (isExpired(file)) return res.status(410).send('Expired');
   const filePath = safeUploadPath(file.filename);
+  const wantsMp3Fallback = req.query.transcode === 'mp3';
+
+  if (wantsMp3Fallback && (file.codec === 'opus' || file.codec === 'opus_live')) {
+    streamLiveMp3(req, res, filePath, getSetting('compression_bitrate') || '128');
+    return;
+  }
 
   // Opus live : transcoding à la volée, pas de range, pas de Content-Length
   if (file.codec === 'opus_live') {
-    res.set({ 'Content-Type': 'audio/webm', 'Transfer-Encoding': 'chunked' });
+    res.set({
+      'Content-Type': 'audio/webm',
+      'Transfer-Encoding': 'chunked',
+      'Cache-Control': 'no-store',
+    });
     const proc = ffmpeg(filePath)
       .audioCodec('libopus')
       .audioChannels(2)
@@ -717,19 +829,8 @@ app.get('/stream/:token', (req, res) => {
     return;
   }
 
-  let stat;
-  try { stat = fs.statSync(filePath); } catch { return res.status(404).send('File missing'); }
   const mime = CODEC_MIME[file.codec] || 'audio/mpeg';
-  const range = req.headers.range;
-  if (range) {
-    const [s, e] = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(s, 10), end = e ? parseInt(e, 10) : stat.size - 1;
-    res.writeHead(206, { 'Content-Range':`bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges':'bytes', 'Content-Length': end-start+1, 'Content-Type': mime });
-    fs.createReadStream(filePath, { start, end }).pipe(res);
-  } else {
-    res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': mime });
-    fs.createReadStream(filePath).pipe(res);
-  }
+  streamStaticFile(req, res, filePath, mime);
 });
 
 // ── Public playlist page ──────────────────────────────────────────────────────
@@ -850,10 +951,35 @@ app.get('/embed/:token', (req, res) => {
   res.render('embed', { playlist, files });
 });
 
+app.get('/l/:token', (req, res) => {
+  const sharedLink = stmt.getSharedLinkByToken.get(req.params.token);
+  if (!sharedLink) return res.status(404).render('error', { message:'Lien introuvable', user:null });
+
+  const playlists = stmt.getSharedLinkPlaylists.all(sharedLink.id).map(playlist => ({
+    ...playlist,
+    files: stmt.getFilesPublicPlaylistFull.all(playlist.id).filter(f => !isExpired(f)),
+  })).filter(playlist => playlist.files.length > 0 || playlist.file_count > 0);
+
+  if (!playlists.length) {
+    return res.status(404).render('error', { message:'Aucune playlist disponible pour ce lien', user:null });
+  }
+
+  const selectedPlaylistId = req.query.playlist ? parseInt(req.query.playlist, 10) : playlists[0].id;
+  res.render('shared-link', { sharedLink, playlists, selectedPlaylistId });
+});
+
 // ── Admin ─────────────────────────────────────────────────────────────────────
 app.get('/admin', requireAdmin, (req, res) => {
   const users = stmt.getAllUsersFull.all();
   const playlists = stmt.getAllPlaylists.all();
+  const sharedLinks = stmt.getAllSharedLinks.all().map(link => {
+    const playlistsForLink = stmt.getSharedLinkPlaylists.all(link.id);
+    return {
+      ...link,
+      playlists: playlistsForLink,
+      playlist_ids: playlistsForLink.map(p => p.id),
+    };
+  });
   const settings = {};
   stmt.getAllSettings.all().forEach(s => { settings[s.key] = s.value; });
 
@@ -864,7 +990,7 @@ app.get('/admin', requireAdmin, (req, res) => {
   }));
 
   res.render('admin', {
-    users: usersWithStorage, playlists, settings,
+    users: usersWithStorage, playlists, sharedLinks, settings,
     stats: {
       totalFiles: stmt.countFiles.get().c,
       totalSize:  stmt.sumFileSize.get().s,
@@ -876,6 +1002,48 @@ app.get('/admin', requireAdmin, (req, res) => {
     },
     error: req.query.error || null,
   });
+});
+
+app.post('/admin/shared-links', requireAdmin, (req, res) => {
+  const name = (req.body.name || '').trim();
+  const raw = Array.isArray(req.body.playlist_ids) ? req.body.playlist_ids : [req.body.playlist_ids];
+  const playlistIds = [...new Set(raw.map(id => parseInt(id, 10)).filter(Number.isInteger))];
+
+  if (!name) return res.redirect('/admin?error=Nom du lien requis');
+  if (!playlistIds.length) return res.redirect('/admin?error=Selectionnez au moins une playlist');
+
+  const validPlaylistIds = new Set(stmt.getAllPlaylists.all().map(p => p.id));
+  if (playlistIds.some(id => !validPlaylistIds.has(id))) {
+    return res.redirect('/admin?error=Une playlist selectionnee est invalide');
+  }
+
+  createSharedLinkWithPlaylists(name, playlistIds);
+  res.redirect('/admin');
+});
+
+app.post('/admin/shared-links/:id/delete', requireAdmin, (req, res) => {
+  stmt.deleteSharedLink.run(parseInt(req.params.id, 10));
+  res.redirect('/admin');
+});
+
+app.post('/admin/shared-links/:id/update', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const link = stmt.getSharedLinkById.get(id);
+  if (!link) return res.redirect('/admin?error=Lien introuvable');
+
+  const raw = Array.isArray(req.body.playlist_ids) ? req.body.playlist_ids : [req.body.playlist_ids];
+  const playlistIds = [...new Set(raw.map(val => parseInt(val, 10)).filter(Number.isInteger))];
+
+  if (!playlistIds.length) return res.redirect('/admin?error=Selectionnez au moins une playlist');
+
+  const validPlaylistIds = new Set(stmt.getAllPlaylists.all().map(p => p.id));
+  if (playlistIds.some(id => !validPlaylistIds.has(id))) {
+    return res.redirect('/admin?error=Une playlist selectionnee est invalide');
+  }
+
+  stmt.deleteSharedLinkPlaylists.run(link.id);
+  playlistIds.forEach(pid => stmt.insertSharedLinkPlaylist.run(link.id, pid));
+  res.redirect('/admin');
 });
 
 app.post('/admin/users', requireAdmin, (req, res) => {
@@ -946,6 +1114,9 @@ app.head('/stream/:token', (req, res) => {
   const file = stmt.getFileByToken.get(req.params.token);
   if (!file) return res.status(404).end();
   if (isExpired(file)) return res.status(410).end();
+  if (req.query.transcode === 'mp3' && (file.codec === 'opus' || file.codec === 'opus_live')) {
+    return res.set({ 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' }).end();
+  }
   // opus_live : pas de Content-Length (chunked), P2PAudio tombera en fallback HTTP direct
   if (file.codec === 'opus_live') {
     return res.set({ 'Content-Type': 'audio/webm' }).end();
