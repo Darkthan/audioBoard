@@ -29,13 +29,13 @@
     </div>
 
     <!-- Quota -->
-    <% if (quotaMb > 0) {
-      const pct = Math.min(100, Math.round(storageUsed / (quotaMb * 1048576) * 100));
+    <% if (locals.quotaMb > 0) {
+      const pct = Math.min(100, Math.round(locals.storageUsed / (locals.quotaMb * 1048576) * 100));
     %>
     <div style="margin-bottom:1rem;">
       <div style="display:flex; justify-content:space-between; font-size:.8rem; color:var(--text-muted); margin-bottom:.3rem;">
         <span>Espace utilisé</span>
-        <span><%= (storageUsed/1048576).toFixed(1) %> Mo / <%= quotaMb %> Mo (<%= pct %>%)</span>
+        <span><%= (locals.storageUsed/1048576).toFixed(1) %> Mo / <%= locals.quotaMb %> Mo (<%= pct %>%)</span>
       </div>
       <div style="background:var(--border); border-radius:4px; height:5px; overflow:hidden;">
         <div style="width:<%= pct %>%; background:<%= pct>=90?'var(--danger)':pct>=70?'var(--warning)':'var(--primary)' %>; height:100%;"></div>
