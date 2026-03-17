@@ -1188,16 +1188,37 @@ app.post('/profile/password', requireAuth, (req, res) => {
 
 // ── WebAuthn ──────────────────────────────────────────────────────────────────
 const getOrigin = req => `${req.protocol}://${req.get('host')}`;
-const getRpID   = req => getSetting('webauthn_rp_id') || req.hostname;
 const getRpName = ()  => getSetting('webauthn_rp_name') || 'AudioBoard';
+
+const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$|^\[?[0-9a-fA-F:]+\]?$/;
+function getRpID(req) {
+  const configured = getSetting('webauthn_rp_id');
+  if (configured) return configured;
+  const h = req.hostname;
+  // Adresse de loopback → utiliser 'localhost' (équivalent WebAuthn)
+  if (h === '127.0.0.1' || h === '::1') return 'localhost';
+  return h;
+}
+function assertValidRpID(rpID, res) {
+  if (IP_RE.test(rpID)) {
+    res.status(400).json({
+      error: `WebAuthn ne fonctionne pas avec une adresse IP (${rpID}). ` +
+             `Accédez via http://localhost:${PORT}/ ou configurez le RP ID dans les paramètres d'administration.`,
+    });
+    return false;
+  }
+  return true;
+}
 
 app.post('/profile/webauthn/register/start', requireAuth, async (req, res) => {
   try {
+    const rpID = getRpID(req);
+    if (!assertValidRpID(rpID, res)) return;
     const { id, username } = req.session.user;
     const existing = stmt.getWebAuthnCredsByUser.all(id);
     const options = await generateRegistrationOptions({
       rpName: getRpName(),
-      rpID: getRpID(req),
+      rpID,
       userName: username,
       attestationType: 'none',
       excludeCredentials: existing.map(c => ({
@@ -1265,8 +1286,10 @@ app.post('/profile/webauthn/credentials/:id/delete', requireAuth, (req, res) => 
 
 app.post('/login/webauthn/start', async (req, res) => {
   try {
+    const rpID = getRpID(req);
+    if (!assertValidRpID(rpID, res)) return;
     const options = await generateAuthenticationOptions({
-      rpID: getRpID(req),
+      rpID,
       allowCredentials: [],
       userVerification: 'required',
     });
