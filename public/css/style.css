@@ -56,6 +56,39 @@ a:hover { text-decoration: underline; }
   align-items: center;
   gap: 1rem;
 }
+.navbar-burger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.25rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  width: 36px;
+  height: 36px;
+}
+.navbar-burger span {
+  display: block;
+  height: 2px;
+  width: 100%;
+  background: var(--text);
+  transition: transform 0.2s, opacity 0.2s;
+}
+.navbar-burger--open span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.navbar-burger--open span:nth-child(2) { opacity: 0; }
+.navbar-burger--open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+.navbar-links--open {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  padding: 1rem;
+  position: absolute;
+  top: 60px;
+  right: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+}
 
 .navbar-links a {
   color: var(--text-muted);
@@ -298,6 +331,43 @@ select.form-control {
 }
 #shared_link_playlists {
   min-height: 160px;
+}
+
+@media (max-width: 768px) {
+  .navbar-burger {
+    display: flex;
+  }
+  .navbar-links {
+    display: none;
+  }
+  .admin-grid, .layout {
+    grid-template-columns: 1fr;
+  }
+  .shared-links-section {
+    padding: 1rem;
+  }
+  .shared-link-create, .shared-link-list {
+    gap: 0.5rem;
+  }
+  .playlist-checkboxes,
+  .multi-select {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .playlist-checkbox {
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+  .shared-link-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .shared-link-list-item {
+    padding: 0.75rem;
+  }
+  .shared-link-form {
+    padding-top: 0.5rem;
+  }
 }
 
 @media (max-width: 768px) {

@@ -1,5 +1,10 @@
 <nav class="navbar">
   <div class="navbar-brand"><span>Audio</span>Board</div>
+  <button class="navbar-burger" aria-label="Ouvrir le menu">
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
   <div class="navbar-links">
     <a href="/">Fichiers</a>
     <% if (user && user.role === 'admin') { %>
@@ -10,3 +15,14 @@
     <% } %>
   </div>
 </nav>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const burger = document.querySelector('.navbar-burger');
+    const links = document.querySelector('.navbar-links');
+    if (!burger || !links) return;
+    burger.addEventListener('click', () => {
+      links.classList.toggle('navbar-links--open');
+      burger.classList.toggle('navbar-burger--open');
+    });
+  });
+</script>
