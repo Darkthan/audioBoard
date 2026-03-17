@@ -474,6 +474,9 @@ const upload = multer({
 });
 
 // ── Express ───────────────────────────────────────────────────────────────────
+// Faire confiance au proxy inverse (Nginx, Caddy…) pour X-Forwarded-Proto et X-Forwarded-Host
+// Nécessaire pour que req.protocol = 'https' et req.hostname = domaine public
+app.set('trust proxy', 1);
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
