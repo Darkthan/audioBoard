@@ -9,15 +9,14 @@
 <body>
   <%- include('partials/navbar') %>
 
-  <div class="container" style="max-width:520px; padding-top:2.5rem; padding-bottom:3rem;">
+  <div class="container" style="max-width:560px; padding-top:2.5rem; padding-bottom:3rem;">
     <h1 style="font-size:1.4rem; margin-bottom:1.5rem;">Mon profil</h1>
 
-    <div class="card">
+    <!-- ── Mot de passe ──────────────────────────────────────────────────── -->
+    <div class="card" style="margin-bottom:1.5rem;">
       <div class="card-title">Changer le mot de passe</div>
-
-      <% if (error) { %><div class="alert alert-error"><%= error %></div><% } %>
+      <% if (error)   { %><div class="alert alert-error"><%= error %></div><% } %>
       <% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
-
       <form method="POST" action="/profile/password">
         <div class="form-group">
           <label for="current_password">Mot de passe actuel</label>
@@ -37,6 +36,139 @@
         <button type="submit" class="btn btn-primary">Mettre à jour</button>
       </form>
     </div>
+
+    <!-- ── Clés d'accès (WebAuthn) ──────────────────────────────────────── -->
+    <div class="card">
+      <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:.5rem;">
+        <span>Clés d'accès</span>
+        <button class="btn btn-primary btn-sm" id="addKeyBtn">+ Ajouter une clé</button>
+      </div>
+
+      <div id="waStatus" style="display:none;" class="alert alert-info" style="margin-bottom:.75rem;"></div>
+
+      <% if (!webauthnCreds.length) { %>
+        <p class="text-muted" id="emptyMsg">Aucune clé d'accès enregistrée. Ajoutez-en une pour vous connecter sans mot de passe.</p>
+      <% } %>
+
+      <ul class="track-list" id="credsList" style="<%= webauthnCreds.length ? '' : 'display:none;' %>">
+        <% webauthnCreds.forEach(c => { %>
+          <li class="track-item" data-cred-id="<%= c.id %>" style="padding:.6rem .75rem;">
+            <div class="track-info" style="flex:1;">
+              <span class="track-name cred-name" data-id="<%= c.id %>"><%= c.nickname %></span>
+              <span class="track-meta">
+                Créée le <%= new Date(c.created_at).toLocaleDateString('fr-FR') %>
+                <% if (c.last_used_at) { %> · Utilisée le <%= new Date(c.last_used_at).toLocaleDateString('fr-FR') %><% } %>
+              </span>
+            </div>
+            <div class="track-actions" style="gap:.35rem;">
+              <button class="copy-btn" onclick="renameKey(<%= c.id %>)">Renommer</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteKey(<%= c.id %>)">Suppr.</button>
+            </div>
+          </li>
+        <% }) %>
+      </ul>
+    </div>
   </div>
+
+  <script>
+    // ── Utilitaires base64url ─────────────────────────────────────────────
+    function b64urlToBuffer(b64url) {
+      const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/').padEnd(
+        b64url.length + (4 - b64url.length % 4) % 4, '=');
+      return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+    }
+    function bufferToB64url(buf) {
+      return btoa(String.fromCharCode(...new Uint8Array(buf)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    }
+
+    function setStatus(msg, type = 'info') {
+      const el = document.getElementById('waStatus');
+      el.className = `alert alert-${type}`;
+      el.textContent = msg;
+      el.style.display = msg ? '' : 'none';
+    }
+
+    // ── Enregistrement ────────────────────────────────────────────────────
+    document.getElementById('addKeyBtn').addEventListener('click', async () => {
+      if (!window.PublicKeyCredential) {
+        return setStatus('Votre navigateur ne supporte pas les clés d\'accès.', 'error');
+      }
+      const nickname = prompt('Nom pour cette clé (ex : "iPhone", "YubiKey") :');
+      if (nickname === null) return; // annulé
+      try {
+        setStatus('Initialisation…');
+
+        const optsRes = await fetch('/profile/webauthn/register/start', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        const opts = await optsRes.json();
+        if (opts.error) return setStatus(opts.error, 'error');
+
+        // Préparer les options pour l'API native
+        opts.challenge = b64urlToBuffer(opts.challenge);
+        opts.user.id   = b64urlToBuffer(opts.user.id);
+        if (opts.excludeCredentials)
+          opts.excludeCredentials = opts.excludeCredentials.map(c => ({ ...c, id: b64urlToBuffer(c.id) }));
+
+        setStatus('En attente de votre clé…');
+        const cred = await navigator.credentials.create({ publicKey: opts });
+        if (!cred) return setStatus('Enregistrement annulé.', 'error');
+
+        const regResponse = {
+          id: cred.id,
+          rawId: bufferToB64url(cred.rawId),
+          response: {
+            clientDataJSON:    bufferToB64url(cred.response.clientDataJSON),
+            attestationObject: bufferToB64url(cred.response.attestationObject),
+            transports: cred.response.getTransports ? cred.response.getTransports() : [],
+          },
+          clientExtensionResults: cred.getClientExtensionResults(),
+          type: cred.type,
+        };
+
+        const finishRes = await fetch('/profile/webauthn/register/finish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ registrationResponse: regResponse, nickname }),
+        });
+        const result = await finishRes.json();
+        if (!result.ok) return setStatus(result.error || 'Erreur', 'error');
+
+        setStatus('Clé enregistrée !', 'success');
+        setTimeout(() => location.reload(), 1000);
+      } catch (err) {
+        setStatus('Erreur : ' + err.message, 'error');
+      }
+    });
+
+    // ── Suppression ───────────────────────────────────────────────────────
+    async function deleteKey(id) {
+      if (!confirm('Supprimer cette clé d\'accès ?')) return;
+      const res = await fetch(`/profile/webauthn/credentials/${id}/delete`, { method: 'POST' });
+      if ((await res.json()).ok) {
+        const li = document.querySelector(`[data-cred-id="${id}"]`);
+        li?.remove();
+        if (!document.querySelectorAll('[data-cred-id]').length) {
+          document.getElementById('credsList').style.display = 'none';
+          document.getElementById('emptyMsg') && (document.getElementById('emptyMsg').style.display = '');
+        }
+      }
+    }
+
+    // ── Renommage ─────────────────────────────────────────────────────────
+    async function renameKey(id) {
+      const span = document.querySelector(`.cred-name[data-id="${id}"]`);
+      const current = span?.textContent || '';
+      const name = prompt('Nouveau nom :', current);
+      if (!name || name === current) return;
+      const res = await fetch(`/profile/webauthn/credentials/${id}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nickname: name }),
+      });
+      if ((await res.json()).ok && span) span.textContent = name;
+    }
+  </script>
 </body>
 </html>

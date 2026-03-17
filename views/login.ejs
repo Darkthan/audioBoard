@@ -19,6 +19,21 @@
         <div class="alert alert-info"><%= info %></div>
       <% } %>
 
+      <!-- ── Clé d'accès (WebAuthn) ──────────────────────────────────────── -->
+      <div id="webauthnSection" style="margin-bottom:1rem;">
+        <div class="form-group" style="margin-bottom:.5rem;">
+          <label for="waUsername">Nom d'utilisateur</label>
+          <input type="text" id="waUsername" class="form-control" autocomplete="username"
+                 placeholder="Votre identifiant">
+        </div>
+        <button type="button" id="webauthnBtn" class="btn btn-secondary" style="width:100%; justify-content:center;">
+          🔑 Se connecter avec une clé d'accès
+        </button>
+        <div id="waError" class="alert alert-error" style="display:none; margin-top:.5rem;"></div>
+      </div>
+
+      <div style="text-align:center; margin:.75rem 0; color:var(--text-muted); font-size:.85rem;">— ou —</div>
+
       <% if (locals.passwordlessEnabled) { %>
         <!-- ── Formulaire magic link ─────────────────────────────────── -->
         <form method="POST" action="/login/magic" id="formMagic">
@@ -90,5 +105,74 @@
       <% } %>
     </div>
   </div>
+
+  <script>
+    function b64urlToBuffer(b64url) {
+      const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/').padEnd(
+        b64url.length + (4 - b64url.length % 4) % 4, '=');
+      return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+    }
+    function bufferToB64url(buf) {
+      return btoa(String.fromCharCode(...new Uint8Array(buf)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    }
+
+    document.getElementById('webauthnBtn')?.addEventListener('click', async () => {
+      const username = document.getElementById('waUsername').value.trim();
+      const errEl    = document.getElementById('waError');
+      errEl.style.display = 'none';
+
+      if (!username) { errEl.textContent = 'Entrez votre nom d\'utilisateur.'; errEl.style.display = ''; return; }
+      if (!window.PublicKeyCredential) { errEl.textContent = 'Navigateur non supporté.'; errEl.style.display = ''; return; }
+
+      try {
+        const optsRes = await fetch('/login/webauthn/start', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username }),
+        });
+        const opts = await optsRes.json();
+        if (opts.error) { errEl.textContent = opts.error; errEl.style.display = ''; return; }
+
+        opts.challenge = b64urlToBuffer(opts.challenge);
+        if (opts.allowCredentials)
+          opts.allowCredentials = opts.allowCredentials.map(c => ({ ...c, id: b64urlToBuffer(c.id) }));
+
+        const assertion = await navigator.credentials.get({ publicKey: opts });
+        if (!assertion) { errEl.textContent = 'Authentification annulée.'; errEl.style.display = ''; return; }
+
+        const assertionResponse = {
+          id: assertion.id,
+          rawId: bufferToB64url(assertion.rawId),
+          response: {
+            clientDataJSON:    bufferToB64url(assertion.response.clientDataJSON),
+            authenticatorData: bufferToB64url(assertion.response.authenticatorData),
+            signature:         bufferToB64url(assertion.response.signature),
+            userHandle: assertion.response.userHandle ? bufferToB64url(assertion.response.userHandle) : null,
+          },
+          clientExtensionResults: assertion.getClientExtensionResults(),
+          type: assertion.type,
+        };
+
+        const finishRes = await fetch('/login/webauthn/finish', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(assertionResponse),
+        });
+        const result = await finishRes.json();
+        if (result.ok) window.location.href = result.redirect || '/';
+        else { errEl.textContent = result.error || 'Authentification échouée.'; errEl.style.display = ''; }
+      } catch (err) {
+        errEl.textContent = 'Erreur : ' + err.message;
+        errEl.style.display = '';
+      }
+    });
+
+    // Sync du champ username vers le champ WebAuthn
+    document.querySelectorAll('input[name="username"]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const waInput = document.getElementById('waUsername');
+        if (waInput && !waInput.value) waInput.value = inp.value;
+      });
+    });
+  </script>
 </body>
 </html>

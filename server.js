@@ -10,6 +10,10 @@ const fs = require('fs');
 const { createServer } = require('http');
 const { WebSocketServer } = require('ws');
 const nodemailer = require('nodemailer');
+const {
+  generateRegistrationOptions, verifyRegistrationResponse,
+  generateAuthenticationOptions, verifyAuthenticationResponse,
+} = require('@simplewebauthn/server');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -69,6 +73,20 @@ db.exec(`
     expires_at DATETIME NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credential_id BLOB NOT NULL UNIQUE,
+    public_key BLOB NOT NULL,
+    sign_count INTEGER NOT NULL DEFAULT 0,
+    transports TEXT,
+    nickname TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_used_at DATETIME
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id);
 
   CREATE TABLE IF NOT EXISTS shared_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -186,6 +204,13 @@ const stmt = {
   updateUserEmail:    db.prepare('UPDATE users SET email=? WHERE id=?'),
   updateUserPassword: db.prepare('UPDATE users SET password=? WHERE id=?'),
   deleteUser:         db.prepare('DELETE FROM users WHERE id=?'),
+
+  getWebAuthnCredsByUser:  db.prepare('SELECT id,credential_id,public_key,sign_count,transports,nickname,created_at,last_used_at FROM webauthn_credentials WHERE user_id=? ORDER BY created_at DESC'),
+  getWebAuthnCredByCredId: db.prepare('SELECT id,user_id,credential_id,public_key,sign_count,transports FROM webauthn_credentials WHERE credential_id=?'),
+  insertWebAuthnCred:      db.prepare('INSERT INTO webauthn_credentials (user_id,credential_id,public_key,sign_count,transports,nickname) VALUES (?,?,?,?,?,?)'),
+  updateWebAuthnCounter:   db.prepare("UPDATE webauthn_credentials SET sign_count=?,last_used_at=datetime('now') WHERE id=?"),
+  updateWebAuthnNickname:  db.prepare('UPDATE webauthn_credentials SET nickname=? WHERE id=? AND user_id=?'),
+  deleteWebAuthnCred:      db.prepare('DELETE FROM webauthn_credentials WHERE id=? AND user_id=?'),
 
   insertMagicToken:        db.prepare('INSERT INTO magic_tokens (user_id,token,expires_at) VALUES (?,?,?)'),
   getMagicToken:           db.prepare('SELECT id,user_id,expires_at FROM magic_tokens WHERE token=?'),
@@ -1116,11 +1141,11 @@ app.post('/admin/users/:id/update', requireAdmin, (req, res) => {
 
 // ── Profile ───────────────────────────────────────────────────────────────────
 app.get('/profile', requireAuth, (req, res) => {
-  res.render('profile', { error: null, success: null });
+  res.render('profile', { error: null, success: null, webauthnCreds: stmt.getWebAuthnCredsByUser.all(req.session.user.id) });
 });
 
 app.post('/profile/password', requireAuth, (req, res) => {
-  const render = (error, success) => res.render('profile', { error, success });
+  const render = (error, success) => res.render('profile', { error, success, webauthnCreds: stmt.getWebAuthnCredsByUser.all(req.session.user.id) });
   const current = (req.body.current_password || '').trim();
   const newPwd  = (req.body.new_password   || '').trim();
   const confirm = (req.body.confirm        || '').trim();
@@ -1133,6 +1158,139 @@ app.post('/profile/password', requireAuth, (req, res) => {
     return render('Les mots de passe ne correspondent pas.', null);
   stmt.updateUserPassword.run(bcrypt.hashSync(newPwd, 10), user.id);
   render(null, 'Mot de passe mis à jour.');
+});
+
+// ── WebAuthn ──────────────────────────────────────────────────────────────────
+const getOrigin = req => `${req.protocol}://${req.get('host')}`;
+
+app.post('/profile/webauthn/register/start', requireAuth, async (req, res) => {
+  try {
+    const { id, username } = req.session.user;
+    const existing = stmt.getWebAuthnCredsByUser.all(id);
+    const options = await generateRegistrationOptions({
+      rpName: 'AudioBoard',
+      rpID: req.hostname,
+      userName: username,
+      attestationType: 'none',
+      excludeCredentials: existing.map(c => ({
+        id: c.credential_id,
+        transports: JSON.parse(c.transports || '[]'),
+      })),
+      authenticatorSelection: { residentKey: 'discouraged', userVerification: 'preferred' },
+    });
+    req.session.webauthnRegChallenge = options.challenge;
+    res.json(options);
+  } catch (err) {
+    console.error('WebAuthn register start:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+app.post('/profile/webauthn/register/finish', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.session.user;
+    const expectedChallenge = req.session.webauthnRegChallenge;
+    if (!expectedChallenge) return res.status(400).json({ error: 'Aucune cérémonie en cours' });
+    const { registrationResponse, nickname } = req.body;
+    const { verified, registrationInfo } = await verifyRegistrationResponse({
+      response: registrationResponse,
+      expectedChallenge,
+      expectedOrigin: getOrigin(req),
+      expectedRPID: req.hostname,
+    });
+    if (!verified || !registrationInfo) return res.status(400).json({ error: 'Vérification échouée' });
+    const { credential } = registrationInfo;
+    stmt.insertWebAuthnCred.run(
+      id,
+      Buffer.from(credential.id, 'base64url'),
+      Buffer.from(credential.publicKey),
+      credential.counter,
+      JSON.stringify(credential.transports || []),
+      (nickname || '').trim() || `Clé ${new Date().toLocaleDateString('fr-FR')}`,
+    );
+    delete req.session.webauthnRegChallenge;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('WebAuthn register finish:', err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/profile/webauthn/credentials', requireAuth, (req, res) => {
+  const creds = stmt.getWebAuthnCredsByUser.all(req.session.user.id).map(c => ({
+    id: c.id, nickname: c.nickname, created_at: c.created_at, last_used_at: c.last_used_at,
+  }));
+  res.json(creds);
+});
+
+app.post('/profile/webauthn/credentials/:id/rename', requireAuth, (req, res) => {
+  const nickname = (req.body.nickname || '').trim();
+  if (!nickname) return res.status(400).json({ error: 'Nom requis' });
+  stmt.updateWebAuthnNickname.run(nickname, parseInt(req.params.id, 10), req.session.user.id);
+  res.json({ ok: true });
+});
+
+app.post('/profile/webauthn/credentials/:id/delete', requireAuth, (req, res) => {
+  stmt.deleteWebAuthnCred.run(parseInt(req.params.id, 10), req.session.user.id);
+  res.json({ ok: true });
+});
+
+app.post('/login/webauthn/start', async (req, res) => {
+  try {
+    const username = (req.body.username || '').trim();
+    const user = stmt.getUserByUsername.get(username);
+    const allowCredentials = user
+      ? stmt.getWebAuthnCredsByUser.all(user.id).map(c => ({
+          id: c.credential_id,
+          transports: JSON.parse(c.transports || '[]'),
+        }))
+      : [];
+    const options = await generateAuthenticationOptions({
+      rpID: req.hostname,
+      allowCredentials,
+      userVerification: 'preferred',
+    });
+    req.session.webauthnAuthChallenge = { challenge: options.challenge, username };
+    res.json(options);
+  } catch (err) {
+    console.error('WebAuthn auth start:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+app.post('/login/webauthn/finish', async (req, res) => {
+  const fail = () => res.status(401).json({ error: 'Authentification échouée' });
+  try {
+    const sessionData = req.session.webauthnAuthChallenge;
+    if (!sessionData) return fail();
+    const { challenge: expectedChallenge, username } = sessionData;
+    const user = stmt.getUserByUsername.get(username);
+    if (!user) return fail();
+    const assertionResponse = req.body;
+    const credIdBuf = Buffer.from(assertionResponse.rawId, 'base64url');
+    const cred = stmt.getWebAuthnCredByCredId.get(credIdBuf);
+    if (!cred || cred.user_id !== user.id) return fail();
+    const { verified, authenticationInfo } = await verifyAuthenticationResponse({
+      response: assertionResponse,
+      expectedChallenge,
+      expectedOrigin: getOrigin(req),
+      expectedRPID: req.hostname,
+      credential: {
+        id: Buffer.from(cred.credential_id).toString('base64url'),
+        publicKey: new Uint8Array(cred.public_key),
+        counter: cred.sign_count,
+        transports: JSON.parse(cred.transports || '[]'),
+      },
+    });
+    if (!verified) return fail();
+    stmt.updateWebAuthnCounter.run(authenticationInfo.newCounter, cred.id);
+    delete req.session.webauthnAuthChallenge;
+    req.session.user = { id: user.id, username: user.username, role: user.role };
+    res.json({ ok: true, redirect: '/' });
+  } catch (err) {
+    console.error('WebAuthn auth finish:', err);
+    fail();
+  }
 });
 
 app.post('/admin/users/:id/delete', requireAdmin, (req, res) => {
