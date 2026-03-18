@@ -198,6 +198,7 @@ const stmt = {
   getAllSettings: db.prepare('SELECT * FROM settings'),
 
   getUserByUsername: db.prepare('SELECT id,username,password,role,email FROM users WHERE username=?'),
+  getUserByEmail:    db.prepare('SELECT id,username,password,role,email FROM users WHERE email=?'),
   getUserById:       db.prepare('SELECT id,username,role FROM users WHERE id=?'),
   getAdminExists:    db.prepare("SELECT id FROM users WHERE role='admin'"),
   getAllUsers:       db.prepare('SELECT id,username,role,email,created_at FROM users ORDER BY created_at'),
@@ -559,7 +560,8 @@ app.post('/login', (req, res) => {
 
 app.post('/login/magic', async (req, res) => {
   const renderLogin = (error, info) => res.render('login', { error, info, prefillUsername: null });
-  const user = stmt.getUserByUsername.get((req.body.username || '').trim());
+  const input = (req.body.username || '').trim();
+  const user  = stmt.getUserByUsername.get(input) || stmt.getUserByEmail.get(input);
 
   // Réponse neutre même si l'utilisateur n'existe pas (sécurité)
   if (!user || !user.email) {
