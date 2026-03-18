@@ -187,6 +187,11 @@ db.exec(`
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_shared_link_playlists_playlist ON shared_link_playlists(playlist_id)');
 
+  // Magic tokens — request_id + consumed pour le mode cross-device
+  const mtCols = db.prepare('PRAGMA table_info(magic_tokens)').all().map(c => c.name);
+  if (!mtCols.includes('request_id')) db.exec('ALTER TABLE magic_tokens ADD COLUMN request_id TEXT');
+  if (!mtCols.includes('consumed'))   db.exec('ALTER TABLE magic_tokens ADD COLUMN consumed INTEGER DEFAULT 0');
+
   // Covers directory
   fs.mkdirSync(path.join(UPLOADS_DIR, 'covers'), { recursive: true });
 })();
@@ -214,10 +219,12 @@ const stmt = {
   updateWebAuthnNickname:  db.prepare('UPDATE webauthn_credentials SET nickname=? WHERE id=? AND user_id=?'),
   deleteWebAuthnCred:      db.prepare('DELETE FROM webauthn_credentials WHERE id=? AND user_id=?'),
 
-  insertMagicToken:        db.prepare('INSERT INTO magic_tokens (user_id,token,expires_at) VALUES (?,?,?)'),
-  getMagicToken:           db.prepare('SELECT id,user_id,expires_at FROM magic_tokens WHERE token=?'),
-  deleteMagicToken:        db.prepare('DELETE FROM magic_tokens WHERE id=?'),
-  deleteExpiredMagicTokens:db.prepare("DELETE FROM magic_tokens WHERE expires_at < datetime('now')"),
+  insertMagicToken:           db.prepare('INSERT INTO magic_tokens (user_id,token,expires_at,request_id) VALUES (?,?,?,?)'),
+  getMagicToken:              db.prepare('SELECT id,user_id,expires_at FROM magic_tokens WHERE token=?'),
+  getMagicTokenByRequestId:   db.prepare('SELECT id,user_id,expires_at,consumed FROM magic_tokens WHERE request_id=?'),
+  consumeMagicToken:          db.prepare('UPDATE magic_tokens SET consumed=1 WHERE id=?'),
+  deleteMagicToken:           db.prepare('DELETE FROM magic_tokens WHERE id=?'),
+  deleteExpiredMagicTokens:   db.prepare("DELETE FROM magic_tokens WHERE expires_at < datetime('now')"),
 
   getPlaylistById:         db.prepare('SELECT id,name,owner_id,share_token FROM playlists WHERE id=?'),
   getPlaylistsByOwner:     db.prepare(`
@@ -559,38 +566,102 @@ app.post('/login', (req, res) => {
 });
 
 app.post('/login/magic', async (req, res) => {
-  const renderLogin = (error, info) => res.render('login', { error, info, prefillUsername: null });
   const input = (req.body.username || '').trim();
   const user  = stmt.getUserByUsername.get(input) || stmt.getUserByEmail.get(input);
 
   // Réponse neutre même si l'utilisateur n'existe pas (sécurité)
-  if (!user || !user.email) {
-    return renderLogin(null, 'Si ce compte existe et possède une adresse email, un lien vous a été envoyé.');
-  }
+  if (!user || !user.email) return res.json({ ok: true });
 
   const transporter = createTransporter();
-  if (!transporter) return renderLogin('Le serveur email n\'est pas configuré. Contactez l\'administrateur.', null);
+  if (!transporter) return res.json({ error: 'Le serveur email n\'est pas configuré. Contactez l\'administrateur.' });
 
+  const requestId = uuidv4();
   const token     = uuidv4();
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-  stmt.insertMagicToken.run(user.id, token, expiresAt);
+  stmt.insertMagicToken.run(user.id, token, expiresAt, requestId);
+  req.session.magicRequestId = requestId;
 
   const link = `${req.protocol}://${req.get('host')}/login/magic/${token}`;
+  const safeUsername = escXml(user.username);
+  const safeLink = escXml(link);
   try {
     await transporter.sendMail({
       from:    getSetting('smtp_from') || getSetting('smtp_user'),
       to:      user.email,
       subject: 'Votre lien de connexion AudioBoard',
-      html:    `<p>Bonjour <strong>${user.username}</strong>,</p>
-                <p><a href="${link}" style="font-size:1.1em">Cliquez ici pour vous connecter</a></p>
-                <p style="color:#888;font-size:.9em">Ce lien expire dans 15 minutes. S'il ne s'affiche pas, copiez : ${link}</p>`,
+      text:    `Bonjour ${user.username},\n\nUtilisez ce lien pour vous connecter a AudioBoard :\n${link}\n\nCe lien expire dans 15 minutes.`,
+      html:    `<!DOCTYPE html>
+<html lang="fr">
+  <body style="margin:0; padding:0; background:#0f1418; font-family:Arial,Helvetica,sans-serif; color:#e5edf4;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0f1418; padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px; background:#171d23; border:1px solid #2a323b; border-radius:20px; overflow:hidden;">
+            <tr>
+              <td style="padding:32px 32px 20px; background:linear-gradient(135deg,#171d23 0%,#202932 100%);">
+                <div style="display:inline-block; padding:6px 10px; border-radius:999px; background:rgba(232,93,4,0.12); color:#ffb36b; font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;">AudioBoard</div>
+                <h1 style="margin:18px 0 12px; font-size:28px; line-height:1.2; color:#ffffff;">Connexion sécurisée</h1>
+                <p style="margin:0; font-size:15px; line-height:1.7; color:#b7c2cc;">
+                  Bonjour <strong style="color:#ffffff;">${safeUsername}</strong>, utilisez ce lien pour accéder à votre espace sans mot de passe.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 32px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:20px; background:#12171c; border:1px solid #2a323b; border-radius:16px;">
+                  <tr>
+                    <td style="padding:24px; text-align:center;">
+                      <a href="${safeLink}" style="display:inline-block; padding:14px 24px; background:#e85d04; color:#ffffff; text-decoration:none; border-radius:12px; font-size:16px; font-weight:700;">Ouvrir AudioBoard</a>
+                      <p style="margin:16px 0 0; font-size:13px; line-height:1.6; color:#96a2ad;">
+                        Ce lien expire dans <strong style="color:#ffffff;">15 minutes</strong>.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:20px 0 8px; font-size:13px; line-height:1.6; color:#96a2ad;">Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :</p>
+                <p style="margin:0; padding:14px 16px; background:#12171c; border:1px solid #2a323b; border-radius:12px; word-break:break-all; font-size:13px; line-height:1.6; color:#d8e0e7;">
+                  <a href="${safeLink}" style="color:#ffb36b; text-decoration:none;">${safeLink}</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`,
     });
   } catch (err) {
     console.error('Magic link email error:', err.message);
-    return renderLogin('Échec de l\'envoi de l\'email. Vérifiez la configuration SMTP.', null);
+    return res.json({ error: 'Échec de l\'envoi de l\'email. Vérifiez la configuration SMTP.' });
   }
 
-  renderLogin(null, 'Lien de connexion envoyé ! Vérifiez votre boîte mail.');
+  res.json({ ok: true });
+});
+
+// Polling : Tab A vérifie si le token a été consommé depuis un autre appareil
+app.get('/login/magic/poll', (req, res) => {
+  const requestId = req.session.magicRequestId;
+  if (!requestId) return res.json({ ok: false });
+
+  const record = stmt.getMagicTokenByRequestId.get(requestId);
+  if (!record) return res.json({ ok: false });
+
+  if (new Date(record.expires_at) < new Date()) {
+    delete req.session.magicRequestId;
+    return res.json({ ok: false, expired: true });
+  }
+
+  if (record.consumed) {
+    const user = stmt.getUserById.get(record.user_id);
+    stmt.deleteMagicToken.run(record.id);
+    delete req.session.magicRequestId;
+    if (!user) return res.json({ ok: false });
+    req.session.user = { id: user.id, username: user.username, role: user.role };
+    return res.json({ ok: true });
+  }
+
+  res.json({ ok: false });
 });
 
 app.get('/login/magic/:token', (req, res) => {
@@ -599,11 +670,9 @@ app.get('/login/magic/:token', (req, res) => {
     stmt.deleteMagicToken.run(record?.id);
     return res.render('login', { error: 'Lien invalide ou expiré. Demandez-en un nouveau.', info: null, prefillUsername: null });
   }
-  stmt.deleteMagicToken.run(record.id);
-  const user = stmt.getUserById.get(record.user_id);
-  if (!user) return res.render('login', { error: 'Compte introuvable.', info: null, prefillUsername: null });
-  req.session.user = { id: user.id, username: user.username, role: user.role };
-  res.redirect('/');
+  // Marquer comme consommé — la session sera créée sur l'onglet d'origine via /login/magic/poll
+  stmt.consumeMagicToken.run(record.id);
+  res.render('magic-confirmed');
 });
 
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login'); });

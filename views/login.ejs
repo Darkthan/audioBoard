@@ -73,13 +73,19 @@
         <div style="text-align:center; margin:1rem 0; color:var(--text-muted); font-size:.85rem;">
           — ou —
         </div>
-        <form method="POST" action="/login/magic" id="formMagic">
-          <input type="hidden" name="username" id="hiddenUsernameMagic">
-          <button type="submit" class="btn btn-secondary"
+        <div id="magicLinkSection">
+          <input type="hidden" id="hiddenUsernameMagic">
+          <button type="button" id="magicLinkBtn" class="btn btn-secondary"
                   style="width:100%; justify-content:center;">
             Recevoir un lien de connexion
           </button>
-        </form>
+        </div>
+        <div id="magicLinkWaiting" style="display:none; text-align:center; padding:.75rem 0;">
+          <div class="text-muted text-sm" style="margin-bottom:.5rem;">
+            Lien envoyé — en attente de validation…
+          </div>
+          <div id="magicLinkError" class="alert alert-error" style="display:none;"></div>
+        </div>
         <% } %>
       </div>
 
@@ -98,6 +104,7 @@
       document.getElementById('step1').style.display = 'none';
       document.getElementById('step2').style.display = '';
       document.getElementById('password').focus();
+      stopMagicPoll(); // annuler un éventuel poll en cours si on revient en arrière
     }
 
     function goBack() {
@@ -121,6 +128,60 @@
       document.getElementById('usernameInput').value = prefill;
       goToStep2(prefill);
     }
+
+    // ── Magic link (cross-device) ─────────────────────────────────────────────
+    let magicPollTimer = null;
+
+    function stopMagicPoll() {
+      if (magicPollTimer) { clearInterval(magicPollTimer); magicPollTimer = null; }
+    }
+
+    function startMagicPoll() {
+      stopMagicPoll();
+      magicPollTimer = setInterval(async () => {
+        try {
+          const r = await fetch('/login/magic/poll');
+          const d = await r.json();
+          if (d.ok) {
+            stopMagicPoll();
+            window.location.href = '/';
+          } else if (d.expired) {
+            stopMagicPoll();
+            const errEl = document.getElementById('magicLinkError');
+            if (errEl) { errEl.textContent = 'Le lien a expiré. Veuillez en demander un nouveau.'; errEl.style.display = ''; }
+          }
+        } catch { /* réseau indisponible, on réessaie au prochain tick */ }
+      }, 2000);
+    }
+
+    document.getElementById('magicLinkBtn')?.addEventListener('click', async () => {
+      const username = document.getElementById('hiddenUsernameMagic')?.value || '';
+      const btn = document.getElementById('magicLinkBtn');
+      btn.disabled = true;
+      const errEl = document.getElementById('magicLinkError');
+      if (errEl) errEl.style.display = 'none';
+
+      try {
+        const r = await fetch('/login/magic', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'username=' + encodeURIComponent(username),
+        });
+        const d = await r.json();
+        if (d.error) {
+          btn.disabled = false;
+          if (errEl) { errEl.textContent = d.error; errEl.style.display = ''; }
+          return;
+        }
+        // Afficher l'état d'attente et démarrer le polling
+        document.getElementById('magicLinkSection').style.display = 'none';
+        document.getElementById('magicLinkWaiting').style.display = '';
+        startMagicPoll();
+      } catch {
+        btn.disabled = false;
+        if (errEl) { errEl.textContent = 'Erreur réseau. Réessayez.'; errEl.style.display = ''; }
+      }
+    });
 
     // ── WebAuthn ──────────────────────────────────────────────────────────────
     function b64urlToBuffer(b64url) {
