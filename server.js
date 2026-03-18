@@ -173,6 +173,7 @@ db.exec(`
   const plCols = db.prepare('PRAGMA table_info(playlists)').all().map(c => c.name);
   if (!plCols.includes('allow_download'))   db.exec('ALTER TABLE playlists ADD COLUMN allow_download INTEGER DEFAULT 0');
   if (!plCols.includes('playlist_password')) db.exec('ALTER TABLE playlists ADD COLUMN playlist_password TEXT');
+  if (!plCols.includes('empty_since'))      db.exec('ALTER TABLE playlists ADD COLUMN empty_since DATETIME');
 
   // Add user quota column
   if (!userCols.includes('quota_mb')) db.exec('ALTER TABLE users ADD COLUMN quota_mb INTEGER');
@@ -285,7 +286,11 @@ const stmt = {
   deleteFilesByPlaylist: db.prepare('DELETE FROM audio_files WHERE playlist_id=?'),
   countFiles:  db.prepare('SELECT COUNT(*) as c FROM audio_files'),
   sumFileSize: db.prepare('SELECT COALESCE(SUM(size),0) as s FROM audio_files'),
-  getExpired:  db.prepare("SELECT id,filename FROM audio_files WHERE expires_at IS NOT NULL AND expires_at<datetime('now')"),
+  getExpired:  db.prepare("SELECT id,filename,playlist_id FROM audio_files WHERE expires_at IS NOT NULL AND expires_at<datetime('now')"),
+  countFilesInPlaylist:     db.prepare('SELECT COUNT(*) as c FROM audio_files WHERE playlist_id=?'),
+  setPlaylistEmptySince:    db.prepare("UPDATE playlists SET empty_since = datetime('now') WHERE id = ? AND empty_since IS NULL"),
+  clearPlaylistEmptySince:  db.prepare('UPDATE playlists SET empty_since = NULL WHERE id = ?'),
+  getExpiredEmptyPlaylists: db.prepare("SELECT id FROM playlists WHERE empty_since IS NOT NULL AND julianday('now') - julianday(empty_since) >= ?"),
 
   // Metadata & stats
   getFilesPublicPlaylistFull: db.prepare(`
@@ -322,7 +327,7 @@ const stmt = {
 // ── Default settings & admin ──────────────────────────────────────────────────
 const CODECS = ['none', 'mp3', 'aac', 'opus', 'opus_live'];
 const defaults = {
-  compression_codec:'mp3', compression_bitrate:'128', retention_days:'30',
+  compression_codec:'mp3', compression_bitrate:'128', retention_days:'30', empty_playlist_retention_days:'0',
   webrtc_enabled:'1',
   passwordless_enabled:'0',
   smtp_host:'', smtp_port:'587', smtp_secure:'0', smtp_user:'', smtp_pass:'', smtp_from:'',
@@ -350,7 +355,8 @@ const ENV_SETTINGS_MAP = {
   default_quota_mb:     'DEFAULT_QUOTA_MB',
   webauthn_enabled:     'WEBAUTHN_ENABLED',
   webauthn_rp_id:       'WEBAUTHN_RP_ID',
-  webauthn_rp_name:     'WEBAUTHN_RP_NAME',
+  webauthn_rp_name:               'WEBAUTHN_RP_NAME',
+  empty_playlist_retention_days:  'EMPTY_PLAYLIST_RETENTION_DAYS',
 };
 for (const [key, envVar] of Object.entries(ENV_SETTINGS_MAP)) {
   if (process.env[envVar] !== undefined) stmt.upsertSetting.run(key, process.env[envVar]);
@@ -444,6 +450,13 @@ function deletePlaylist(id) {
   for (const f of stmt.getFilesByPlaylistId.all(id)) tryUnlink(safeUploadPath(f.filename));
   stmt.deleteFilesByPlaylist.run(id);
   stmt.deletePlaylist.run(id);
+}
+
+function updatePlaylistEmptySince(playlistId) {
+  if (!playlistId) return;
+  const { c } = stmt.countFilesInPlaylist.get(playlistId);
+  if (c === 0) stmt.setPlaylistEmptySince.run(playlistId);
+  else stmt.clearPlaylistEmptySince.run(playlistId);
 }
 
 const reorderPlaylist = db.transaction((playlistId, orderedIds) => {
@@ -817,6 +830,7 @@ async function persistFile(file, playlistId, userId, options) {
     duration, meta.artist || null, meta.album || null, meta.title || null,
     hasCover, waveformJson
   );
+  stmt.clearPlaylistEmptySince.run(playlistId);
 }
 
 app.post('/upload', requireAuth, upload.array('audio', 50), async (req, res) => {
@@ -881,6 +895,7 @@ app.post('/files/:id/delete', requireAuth, (req, res) => {
     return res.status(403).json({ error:'Non autorisé' });
   tryUnlink(safeUploadPath(file.filename));
   stmt.deleteFile.run(file.id);
+  updatePlaylistEmptySince(file.playlist_id);
   res.redirect('/playlists/' + file.playlist_id);
 });
 
@@ -1352,12 +1367,13 @@ app.post('/admin/playlists/:id/delete', requireAdmin, (req, res) => {
 });
 
 app.post('/admin/settings', requireAdmin, (req, res) => {
-  const { compression_codec, compression_bitrate, retention_days, webrtc_enabled,
-          passwordless_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from,
+  const { compression_codec, compression_bitrate, retention_days, empty_playlist_retention_days,
+          webrtc_enabled, passwordless_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from,
           webauthn_enabled, webauthn_rp_id, webauthn_rp_name } = req.body;
   stmt.upsertSetting.run('compression_codec',   CODECS.includes(compression_codec) ? compression_codec : 'none');
   stmt.upsertSetting.run('compression_bitrate', compression_bitrate || '128');
-  stmt.upsertSetting.run('retention_days',      retention_days || '30');
+  stmt.upsertSetting.run('retention_days',                 retention_days || '30');
+  stmt.upsertSetting.run('empty_playlist_retention_days', String(Math.max(0, parseInt(empty_playlist_retention_days || '0', 10))));
   stmt.upsertSetting.run('webrtc_enabled',      webrtc_enabled      === '1' ? '1' : '0');
   stmt.upsertSetting.run('passwordless_enabled',passwordless_enabled === '1' ? '1' : '0');
   stmt.upsertSetting.run('smtp_host',    (smtp_host   || '').trim());
@@ -1374,9 +1390,25 @@ app.post('/admin/settings', requireAdmin, (req, res) => {
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 function cleanupExpired() {
+  // Fichiers expirés
   const expired = stmt.getExpired.all();
-  for (const f of expired) { tryUnlink(safeUploadPath(f.filename)); stmt.deleteFile.run(f.id); }
+  const affectedPlaylists = new Set();
+  for (const f of expired) {
+    tryUnlink(safeUploadPath(f.filename));
+    if (f.playlist_id) affectedPlaylists.add(f.playlist_id);
+    stmt.deleteFile.run(f.id);
+  }
+  for (const pid of affectedPlaylists) updatePlaylistEmptySince(pid);
   if (expired.length) console.log(`Nettoyage : ${expired.length} fichier(s) expiré(s)`);
+
+  // Playlists vides depuis trop longtemps
+  const emptyDays = parseInt(getSetting('empty_playlist_retention_days') || '0', 10);
+  if (emptyDays > 0) {
+    const emptyPlaylists = stmt.getExpiredEmptyPlaylists.all(emptyDays);
+    for (const p of emptyPlaylists) deletePlaylist(p.id);
+    if (emptyPlaylists.length) console.log(`Nettoyage : ${emptyPlaylists.length} playlist(s) vide(s) supprimée(s)`);
+  }
+
   stmt.deleteExpiredMagicTokens.run();
 }
 setInterval(cleanupExpired, 60 * 60 * 1000);

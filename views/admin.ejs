@@ -126,9 +126,18 @@
             </div>
           </div>
           <div class="form-group">
-            <label for="retention_days">Conservation (jours)</label>
+            <label for="retention_days">Conservation des fichiers (jours)</label>
             <input type="number" name="retention_days" id="retention_days" class="form-control"
                    value="<%= settings.retention_days %>" min="1" max="3650">
+          </div>
+          <div class="form-group">
+            <label for="empty_playlist_retention_days">Suppression des playlists vides après (jours)</label>
+            <input type="number" name="empty_playlist_retention_days" id="empty_playlist_retention_days" class="form-control"
+                   value="<%= settings.empty_playlist_retention_days || '0' %>" min="0" max="3650">
+            <p class="text-muted text-sm" style="margin:.25rem 0 0;">
+              Une playlist vide de toute piste sera supprimée automatiquement après ce délai.
+              <strong>0</strong> = désactivé (les playlists vides sont conservées indéfiniment).
+            </p>
           </div>
 
           <hr style="border:none; border-top:1px solid var(--border); margin:1.25rem 0;">
