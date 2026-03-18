@@ -19,91 +19,110 @@
         <div class="alert alert-info"><%= info %></div>
       <% } %>
 
-      <% if (locals.webauthnEnabled) { %>
-      <!-- ── Clé d'accès (WebAuthn) ──────────────────────────────────────── -->
-      <div id="webauthnSection" style="margin-bottom:1rem;">
-        <button type="button" id="webauthnBtn" class="btn btn-secondary" style="width:100%; justify-content:center;">
-          🔑 Se connecter avec une clé d'accès
+      <!-- ── Étape 1 : identifiant ─────────────────────────────────────────── -->
+      <div id="step1">
+        <div class="form-group">
+          <label for="usernameInput">Nom d'utilisateur</label>
+          <input type="text" id="usernameInput" class="form-control"
+                 autocomplete="username" autofocus placeholder="Votre identifiant">
+        </div>
+        <button type="button" id="continueBtn" class="btn btn-primary"
+                style="width:100%; justify-content:center;">
+          Continuer →
         </button>
-        <div id="waError" class="alert alert-error" style="display:none; margin-top:.5rem;"></div>
+
+        <% if (locals.webauthnEnabled) { %>
+        <div style="margin-top:1.5rem; padding-top:1.25rem; border-top:1px solid var(--border);">
+          <p class="text-muted text-sm" style="text-align:center; margin:0 0 .75rem;">
+            Ou connectez-vous sans mot de passe :
+          </p>
+          <button type="button" id="webauthnBtn" class="btn btn-secondary"
+                  style="width:100%; justify-content:center;">
+            🔑 Se connecter avec une clé d'accès
+          </button>
+          <div id="waError" class="alert alert-error" style="display:none; margin-top:.5rem;"></div>
+        </div>
+        <% } %>
       </div>
 
-      <div style="text-align:center; margin:.75rem 0; color:var(--text-muted); font-size:.85rem;">— ou —</div>
-      <% } %>
-
-      <% if (locals.passwordlessEnabled) { %>
-        <!-- ── Formulaire magic link ─────────────────────────────────── -->
-        <form method="POST" action="/login/magic" id="formMagic">
-          <div class="form-group">
-            <label for="username">Nom d'utilisateur</label>
-            <input type="text" id="username" name="username" class="form-control" required autofocus>
-          </div>
-          <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">
-            Recevoir un lien de connexion
-          </button>
-        </form>
-
-        <div style="text-align:center; margin:1rem 0; color:var(--text-muted); font-size:.85rem;">
-          — ou —
+      <!-- ── Étape 2 : mot de passe (et magic link si dispo) ──────────────── -->
+      <div id="step2" style="display:none;">
+        <div style="display:flex; align-items:center; gap:.75rem; margin-bottom:1.25rem;">
+          <button type="button" onclick="goBack()"
+                  style="background:none; border:none; cursor:pointer; color:var(--primary);
+                         font-size:1.1rem; padding:0; line-height:1;" aria-label="Retour">←</button>
+          <span id="usernameDisplay"
+                style="font-weight:500; color:var(--text); font-size:.95rem;
+                       overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
         </div>
 
-        <!-- ── Toggle mot de passe ───────────────────────────────────── -->
-        <div id="passwordSection" style="display:none;">
-          <form method="POST" action="/login">
-            <div class="form-group">
-              <label for="username2">Nom d'utilisateur</label>
-              <input type="text" id="username2" name="username" class="form-control" required>
-            </div>
-            <div class="form-group">
-              <label for="password">Mot de passe</label>
-              <input type="password" id="password" name="password" class="form-control" required autofocus>
-            </div>
-            <button type="submit" class="btn btn-secondary" style="width:100%; justify-content:center;">
-              Se connecter avec un mot de passe
-            </button>
-          </form>
-        </div>
-
-        <button type="button" id="togglePassword" onclick="togglePasswordForm()"
-                style="background:none; border:none; color:var(--primary); cursor:pointer; width:100%; margin-top:.5rem; font-size:.875rem; text-decoration:underline;">
-          Se connecter avec un mot de passe
-        </button>
-
-        <script>
-          function togglePasswordForm() {
-            const sec = document.getElementById('passwordSection');
-            const btn = document.getElementById('togglePassword');
-            const open = sec.style.display === 'none';
-            sec.style.display = open ? '' : 'none';
-            btn.textContent = open ? 'Annuler' : 'Se connecter avec un mot de passe';
-            if (open) {
-              // Sync username
-              const u = document.getElementById('username').value;
-              if (u) document.getElementById('username2').value = u;
-              document.getElementById('password').focus();
-            }
-          }
-        </script>
-      <% } else { %>
-        <!-- ── Formulaire mot de passe classique ─────────────────────── -->
-        <form method="POST" action="/login">
-          <div class="form-group">
-            <label for="username">Nom d'utilisateur</label>
-            <input type="text" id="username" name="username" class="form-control" required autofocus>
-          </div>
+        <form method="POST" action="/login" id="formPassword">
+          <input type="hidden" name="username" id="hiddenUsername">
           <div class="form-group">
             <label for="password">Mot de passe</label>
-            <input type="password" id="password" name="password" class="form-control" required>
+            <input type="password" id="password" name="password" class="form-control"
+                   required autocomplete="current-password">
           </div>
-          <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; margin-top:0.5rem;">
+          <button type="submit" class="btn btn-primary"
+                  style="width:100%; justify-content:center;">
             Se connecter
           </button>
         </form>
-      <% } %>
+
+        <% if (locals.passwordlessEnabled) { %>
+        <div style="text-align:center; margin:1rem 0; color:var(--text-muted); font-size:.85rem;">
+          — ou —
+        </div>
+        <form method="POST" action="/login/magic" id="formMagic">
+          <input type="hidden" name="username" id="hiddenUsernameMagic">
+          <button type="submit" class="btn btn-secondary"
+                  style="width:100%; justify-content:center;">
+            Recevoir un lien de connexion
+          </button>
+        </form>
+        <% } %>
+      </div>
+
     </div>
   </div>
 
   <script>
+    // ── Navigation entre étapes ───────────────────────────────────────────────
+    const prefill = '<%= (locals.prefillUsername || "").replace(/'/g, "\\'") %>';
+
+    function goToStep2(username) {
+      document.getElementById('usernameDisplay').textContent = username;
+      document.getElementById('hiddenUsername').value = username;
+      const magicInput = document.getElementById('hiddenUsernameMagic');
+      if (magicInput) magicInput.value = username;
+      document.getElementById('step1').style.display = 'none';
+      document.getElementById('step2').style.display = '';
+      document.getElementById('password').focus();
+    }
+
+    function goBack() {
+      document.getElementById('step2').style.display = 'none';
+      document.getElementById('step1').style.display = '';
+      document.getElementById('usernameInput').focus();
+    }
+
+    document.getElementById('continueBtn').addEventListener('click', () => {
+      const username = document.getElementById('usernameInput').value.trim();
+      if (!username) { document.getElementById('usernameInput').focus(); return; }
+      goToStep2(username);
+    });
+
+    document.getElementById('usernameInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('continueBtn').click();
+    });
+
+    // Si erreur de mot de passe côté serveur, aller directement à l'étape 2
+    if (prefill) {
+      document.getElementById('usernameInput').value = prefill;
+      goToStep2(prefill);
+    }
+
+    // ── WebAuthn ──────────────────────────────────────────────────────────────
     function b64urlToBuffer(b64url) {
       const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/').padEnd(
         b64url.length + (4 - b64url.length % 4) % 4, '=');
@@ -118,12 +137,15 @@
       const errEl = document.getElementById('waError');
       errEl.style.display = 'none';
 
-      if (!window.PublicKeyCredential) { errEl.textContent = 'Navigateur non supporté.'; errEl.style.display = ''; return; }
+      if (!window.PublicKeyCredential) {
+        errEl.textContent = 'Navigateur non supporté.';
+        errEl.style.display = '';
+        return;
+      }
 
       try {
         const optsRes = await fetch('/login/webauthn/start', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: '{}',
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
         });
         const opts = await optsRes.json();
         if (opts.error) { errEl.textContent = opts.error; errEl.style.display = ''; return; }
@@ -160,7 +182,6 @@
         errEl.style.display = '';
       }
     });
-
   </script>
 </body>
 </html>

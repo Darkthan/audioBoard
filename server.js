@@ -533,19 +533,19 @@ app.use((req, res, next) => {
 // ── Auth ──────────────────────────────────────────────────────────────────────
 app.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/');
-  res.render('login', { error: null, info: req.query.info || null });
+  res.render('login', { error: null, info: req.query.info || null, prefillUsername: null });
 });
 
 app.post('/login', (req, res) => {
   const user = stmt.getUserByUsername.get(req.body.username);
   if (!user || !bcrypt.compareSync(req.body.password, user.password))
-    return res.render('login', { error: 'Identifiants incorrects', info: null });
+    return res.render('login', { error: 'Identifiants incorrects', info: null, prefillUsername: req.body.username || '' });
   req.session.user = { id: user.id, username: user.username, role: user.role };
   res.redirect('/');
 });
 
 app.post('/login/magic', async (req, res) => {
-  const renderLogin = (error, info) => res.render('login', { error, info });
+  const renderLogin = (error, info) => res.render('login', { error, info, prefillUsername: null });
   const user = stmt.getUserByUsername.get((req.body.username || '').trim());
 
   // Réponse neutre même si l'utilisateur n'existe pas (sécurité)
@@ -582,11 +582,11 @@ app.get('/login/magic/:token', (req, res) => {
   const record = stmt.getMagicToken.get(req.params.token);
   if (!record || new Date(record.expires_at) < new Date()) {
     stmt.deleteMagicToken.run(record?.id);
-    return res.render('login', { error: 'Lien invalide ou expiré. Demandez-en un nouveau.', info: null });
+    return res.render('login', { error: 'Lien invalide ou expiré. Demandez-en un nouveau.', info: null, prefillUsername: null });
   }
   stmt.deleteMagicToken.run(record.id);
   const user = stmt.getUserById.get(record.user_id);
-  if (!user) return res.render('login', { error: 'Compte introuvable.', info: null });
+  if (!user) return res.render('login', { error: 'Compte introuvable.', info: null, prefillUsername: null });
   req.session.user = { id: user.id, username: user.username, role: user.role };
   res.redirect('/');
 });
