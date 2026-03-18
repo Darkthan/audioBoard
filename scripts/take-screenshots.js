@@ -48,17 +48,13 @@ async function shot(page, name) {
 async function loginWithPassword(page, username, password) {
   await page.goto(`${BASE}/login`);
   await page.waitForLoadState('networkidle');
-  const toggle = page.locator('#togglePassword');
-  if (await toggle.isVisible()) {
-    await toggle.click();
-    await page.fill('#username2', username);
-    await page.fill('#password',  password);
-    await page.locator('#passwordSection [type=submit]').click();
-  } else {
-    await page.fill('#username', username);
-    await page.fill('#password', password);
-    await page.locator('[type=submit]').first().click();
-  }
+  // Étape 1 : saisie du nom d'utilisateur
+  await page.fill('#usernameInput', username);
+  await page.click('#continueBtn');
+  // Étape 2 : saisie du mot de passe
+  await page.waitForSelector('#password', { state: 'visible' });
+  await page.fill('#password', password);
+  await page.locator('#formPassword [type=submit]').click();
   await page.waitForURL(`${BASE}/`);
 }
 
