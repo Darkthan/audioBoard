@@ -493,6 +493,15 @@
     else { updateBars(0, bars); updateBars(0, fsBars); setPlayingState(false); clearState(); }
   });
 
+  // ── Basculement dynamique desktop → mini quand l'espace est insuffisant ──
+  const scCenter = player.querySelector('.sc-center');
+  if (scCenter && typeof ResizeObserver !== 'undefined') {
+    const roPlayer = new ResizeObserver(() => {
+      player.classList.toggle('sc-auto-mini', scCenter.offsetWidth < 120);
+    });
+    roPlayer.observe(player.querySelector('.sc-player-inner') || player);
+  }
+
   // ── Volume ───────────────────────────────────────────────────────────
   volSlider.addEventListener('input', () => {
     audio.volume = volSlider.value;

@@ -1592,6 +1592,17 @@ tr:hover td { background: rgba(99, 102, 241, 0.05); }
   .sc-mini { display: flex; }
 }
 
+/* Basculement dynamique quand le centre est trop étroit (JS ajoute cette classe) */
+.sc-player.sc-auto-mini {
+  height: auto;
+  padding: 0;
+  padding-bottom: max(0px, env(safe-area-inset-bottom));
+  align-items: stretch;
+  flex-direction: column;
+}
+.sc-player.sc-auto-mini .sc-player-inner { display: none; }
+.sc-player.sc-auto-mini .sc-mini { display: flex; }
+
 /* ── Fullscreen player ──────────────────────────────────────────────────── */
 .sc-fullscreen {
   position: fixed;
