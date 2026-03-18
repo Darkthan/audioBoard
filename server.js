@@ -1380,7 +1380,7 @@ app.post('/admin/settings', requireAdmin, (req, res) => {
   stmt.upsertSetting.run('smtp_port',    smtp_port || '587');
   stmt.upsertSetting.run('smtp_secure',  smtp_secure === '1' ? '1' : '0');
   stmt.upsertSetting.run('smtp_user',    (smtp_user  || '').trim());
-  stmt.upsertSetting.run('smtp_pass',    smtp_pass  || '');
+  if (smtp_pass) stmt.upsertSetting.run('smtp_pass', smtp_pass);
   stmt.upsertSetting.run('smtp_from',    (smtp_from  || '').trim());
   stmt.upsertSetting.run('webauthn_enabled', webauthn_enabled === '1' ? '1' : '0');
   stmt.upsertSetting.run('webauthn_rp_id',   (webauthn_rp_id   || '').trim());

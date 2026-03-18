@@ -110,7 +110,14 @@
             </div>
             <div class="form-group" style="margin:0;">
               <label style="font-size:.8rem;">Mot de passe SMTP</label>
-              <input type="password" name="smtp_pass" class="form-control" value="<%= settings.smtp_pass || '' %>" autocomplete="new-password">
+              <input type="password" name="smtp_pass" class="form-control" value=""
+                     placeholder="<%= settings.smtp_pass ? '••••••••' : 'Mot de passe' %>"
+                     autocomplete="new-password">
+              <% if (settings.smtp_pass) { %>
+                <p class="text-muted text-sm" style="margin:.2rem 0 0;">
+                  Mot de passe configuré — laisser vide pour le conserver.
+                </p>
+              <% } %>
             </div>
           </div>
           <div style="display:grid; grid-template-columns:1fr auto; gap:.5rem; margin-top:.5rem; align-items:end;">
