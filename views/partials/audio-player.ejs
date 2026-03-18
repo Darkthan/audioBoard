@@ -277,11 +277,19 @@
   };
 
   // ── Waveform ─────────────────────────────────────────────────────────
+  // Nombre max de barres selon la largeur réelle du conteneur
+  // barre 1.5px + gap 1.5px = 3px par barre minimum
+  function maxBarsFor(container) {
+    const w = container.parentElement?.getBoundingClientRect().width || 0;
+    return w > 0 ? Math.max(30, Math.floor(w / 3)) : BAR_COUNT;
+  }
+
   function buildBars(seed, container) {
+    const count = maxBarsFor(container);
     let s = seed;
     function rand() { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }
-    const heights = Array.from({ length: BAR_COUNT }, (_, i) => {
-      const env = Math.sin(Math.PI * i / BAR_COUNT);
+    const heights = Array.from({ length: count }, (_, i) => {
+      const env = Math.sin(Math.PI * i / count);
       return 0.12 + env * 0.72 * (0.35 + rand() * 0.65);
     });
     container.innerHTML = heights
@@ -337,7 +345,13 @@
       .then(data => {
         if (!data?.peaks?.length) return;
         const buildFromPeaks = (container) => {
-          container.innerHTML = data.peaks
+          const count = maxBarsFor(container);
+          const src   = data.peaks;
+          // Subsample les pics pour ne jamais dépasser la capacité du conteneur
+          const peaks = src.length > count
+            ? Array.from({ length: count }, (_, i) => src[Math.round(i * (src.length - 1) / (count - 1))])
+            : src;
+          container.innerHTML = peaks
             .map(h => `<div class="sc-bar" style="height:${Math.round(Math.max(0.08, h) * 100)}%"></div>`)
             .join('');
           return container.querySelectorAll('.sc-bar');

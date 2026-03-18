@@ -1048,6 +1048,7 @@ tr:hover td { background: rgba(99, 102, 241, 0.05); }
   height: 36px;
   cursor: pointer;
   position: relative;
+  overflow: hidden;
 }
 
 .sc-waveform-bars {
@@ -1056,6 +1057,7 @@ tr:hover td { background: rgba(99, 102, 241, 0.05); }
   gap: 1.5px;
   height: 100%;
   width: 100%;
+  overflow: hidden;
   pointer-events: none;
 }
 
