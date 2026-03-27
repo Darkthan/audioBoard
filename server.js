@@ -548,6 +548,7 @@ app.use((req, res, next) => {
   res.locals.webrtcEnabled = getSetting('webrtc_enabled') !== '0';
   res.locals.passwordlessEnabled = getSetting('passwordless_enabled') === '1';
   res.locals.webauthnEnabled = getSetting('webauthn_enabled') === '1';
+  res.locals.examMode = getSetting('exam_mode') === '1';
   next();
 });
 
@@ -1440,7 +1441,7 @@ app.post('/admin/playlists/:id/delete', requireAdmin, (req, res) => {
 app.post('/admin/settings', requireAdmin, (req, res) => {
   const { compression_codec, compression_bitrate, retention_days, empty_playlist_retention_days,
           webrtc_enabled, passwordless_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from,
-          webauthn_enabled, webauthn_rp_id, webauthn_rp_name } = req.body;
+          webauthn_enabled, webauthn_rp_id, webauthn_rp_name, exam_mode } = req.body;
   stmt.upsertSetting.run('compression_codec',   CODECS.includes(compression_codec) ? compression_codec : 'none');
   stmt.upsertSetting.run('compression_bitrate', compression_bitrate || '128');
   stmt.upsertSetting.run('retention_days',                 retention_days || '30');
@@ -1456,6 +1457,7 @@ app.post('/admin/settings', requireAdmin, (req, res) => {
   stmt.upsertSetting.run('webauthn_enabled', webauthn_enabled === '1' ? '1' : '0');
   stmt.upsertSetting.run('webauthn_rp_id',   (webauthn_rp_id   || '').trim());
   stmt.upsertSetting.run('webauthn_rp_name', (webauthn_rp_name || 'AudioBoard').trim());
+  stmt.upsertSetting.run('exam_mode',        exam_mode         === '1' ? '1' : '0');
   res.redirect('/admin');
 });
 

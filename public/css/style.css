@@ -1094,6 +1094,19 @@ tr:hover td { background: rgba(99, 102, 241, 0.05); }
   flex-shrink: 0;
 }
 
+/* Exam mode badge */
+.sc-exam-badge {
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: #fff;
+  background: var(--warning, #f59e0b);
+  border-radius: 4px;
+  padding: .15rem .4rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .sc-vol-icon {
   color: var(--text-muted);
   cursor: pointer;
