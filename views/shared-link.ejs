@@ -83,7 +83,7 @@
   <%- include('partials/audio-player') %>
 
   <script>
-    const playlists = <%- JSON.stringify(playlists.map(p => ({ id: p.id, name: p.name, fileCount: p.files.length }))) %>;
+    const playlists = <%- JSON.stringify(playlists.map(p => ({ id: p.id, name: p.name, fileCount: p.files.length, examMode: !!p.exam_mode }))) %>;
 
     scRegisterTracks(<%- JSON.stringify(playlists.flatMap(p => p.files.map(f => ({
       token: f.share_token,
@@ -108,6 +108,9 @@
     function showPlaylistView(playlistId) {
       const pl = playlists.find(p => p.id === playlistId);
       if (!pl) return;
+
+      // Mode examen selon la playlist
+      if (typeof scSetExamMode === 'function') scSetExamMode(pl.examMode);
 
       // Mise à jour du titre
       slTitle.textContent = pl.name;

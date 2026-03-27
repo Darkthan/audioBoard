@@ -174,6 +174,7 @@ db.exec(`
   if (!plCols.includes('allow_download'))   db.exec('ALTER TABLE playlists ADD COLUMN allow_download INTEGER DEFAULT 0');
   if (!plCols.includes('playlist_password')) db.exec('ALTER TABLE playlists ADD COLUMN playlist_password TEXT');
   if (!plCols.includes('empty_since'))      db.exec('ALTER TABLE playlists ADD COLUMN empty_since DATETIME');
+  if (!plCols.includes('exam_mode'))        db.exec('ALTER TABLE playlists ADD COLUMN exam_mode INTEGER DEFAULT 0');
 
   // Add user quota column
   if (!userCols.includes('quota_mb')) db.exec('ALTER TABLE users ADD COLUMN quota_mb INTEGER');
@@ -254,7 +255,7 @@ const stmt = {
   getSharedLinkById:       db.prepare('SELECT id, name, token FROM shared_links WHERE id = ?'),
   getSharedLinkByToken:    db.prepare('SELECT id, name, token FROM shared_links WHERE token = ?'),
   getSharedLinkPlaylists:  db.prepare(`
-    SELECT p.id, p.name, p.share_token, p.allow_download, COUNT(af.id) as file_count
+    SELECT p.id, p.name, p.share_token, p.allow_download, p.exam_mode, COUNT(af.id) as file_count
     FROM shared_link_playlists slp
     JOIN playlists p ON p.id = slp.playlist_id
     LEFT JOIN audio_files af ON af.playlist_id = p.id
@@ -322,9 +323,9 @@ const stmt = {
     WHERE played_at >= datetime('now','-6 days') GROUP BY day ORDER BY day
   `),
   // Playlist settings
-  getPlaylistFull:          db.prepare('SELECT id,name,owner_id,share_token,allow_download,playlist_password FROM playlists WHERE id=?'),
-  getPlaylistByShareTokenFull: db.prepare('SELECT id,name,owner_id,allow_download,playlist_password FROM playlists WHERE share_token=?'),
-  updatePlaylistSettings:   db.prepare('UPDATE playlists SET allow_download=?, playlist_password=? WHERE id=?'),
+  getPlaylistFull:          db.prepare('SELECT id,name,owner_id,share_token,allow_download,playlist_password,exam_mode FROM playlists WHERE id=?'),
+  getPlaylistByShareTokenFull: db.prepare('SELECT id,name,owner_id,allow_download,playlist_password,exam_mode FROM playlists WHERE share_token=?'),
+  updatePlaylistSettings:   db.prepare('UPDATE playlists SET allow_download=?, playlist_password=?, exam_mode=? WHERE id=?'),
   // Quota
   getUserFull:          db.prepare('SELECT id,username,role,email,quota_mb FROM users WHERE id=?'),
   getAllUsersFull:       db.prepare('SELECT id,username,role,email,quota_mb,created_at FROM users ORDER BY created_at'),
@@ -548,7 +549,7 @@ app.use((req, res, next) => {
   res.locals.webrtcEnabled = getSetting('webrtc_enabled') !== '0';
   res.locals.passwordlessEnabled = getSetting('passwordless_enabled') === '1';
   res.locals.webauthnEnabled = getSetting('webauthn_enabled') === '1';
-  res.locals.examMode = getSetting('exam_mode') === '1';
+  res.locals.examMode = false; // overridden per-route when a playlist is involved
   next();
 });
 
@@ -741,6 +742,7 @@ app.post('/playlists/:id/settings', requireAuth, async (req, res) => {
   const playlist = stmt.getPlaylistById.get(req.params.id);
   if (!playlist || !canManage(req.session.user, playlist)) return res.redirect('/');
   const allowDownload = req.body.allow_download === '1' ? 1 : 0;
+  const examMode = req.body.exam_mode === '1' ? 1 : 0;
   let passwordHash = null;
   if (req.body.remove_password) {
     passwordHash = null; // suppression explicite
@@ -751,7 +753,7 @@ app.post('/playlists/:id/settings', requireAuth, async (req, res) => {
     const pl = stmt.getPlaylistFull.get(playlist.id);
     passwordHash = pl?.playlist_password || null;
   }
-  stmt.updatePlaylistSettings.run(allowDownload, passwordHash, playlist.id);
+  stmt.updatePlaylistSettings.run(allowDownload, passwordHash, examMode, playlist.id);
   res.redirect('/playlists/' + playlist.id);
 });
 
@@ -788,7 +790,7 @@ app.get('/playlists/:id', requireAuth, (req, res) => {
   const user = stmt.getUserFull.get(req.session.user.id);
   const quotaMb = user?.quota_mb ?? parseInt(getSetting('default_quota_mb') || '0');
   const storageUsed = quotaMb > 0 ? stmt.getUserStorageUsed.get(req.session.user.id).total : 0;
-  res.render('playlist-editor', { playlist, files, error: req.query.error || null, quotaMb, storageUsed });
+  res.render('playlist-editor', { playlist, files, error: req.query.error || null, quotaMb, storageUsed, examMode: !!playlist.exam_mode });
 });
 
 // ── Upload ────────────────────────────────────────────────────────────────────
@@ -1022,7 +1024,7 @@ app.get('/playlist/:token', (req, res) => {
     return res.render('playlist-locked', { token: req.params.token, error: null });
   }
   const files = stmt.getFilesPublicPlaylistFull.all(playlist.id).filter(f => !isExpired(f));
-  res.render('playlist', { playlist, files });
+  res.render('playlist', { playlist, files, examMode: !!playlist.exam_mode });
 });
 
 app.post('/playlist/:token/auth', (req, res) => {
@@ -1128,7 +1130,7 @@ app.get('/embed/:token', (req, res) => {
   if (playlist.playlist_password && !req.session['pl_auth_' + req.params.token])
     return res.status(403).render('error', { message:'Accès restreint', user:null });
   const files = stmt.getFilesPublicPlaylistFull.all(playlist.id).filter(f => !isExpired(f));
-  res.render('embed', { playlist, files });
+  res.render('embed', { playlist, files, examMode: !!playlist.exam_mode });
 });
 
 app.get('/l/:token', (req, res) => {
@@ -1145,7 +1147,8 @@ app.get('/l/:token', (req, res) => {
   }
 
   const selectedPlaylistId = req.query.playlist ? parseInt(req.query.playlist, 10) : playlists[0].id;
-  res.render('shared-link', { sharedLink, playlists, selectedPlaylistId });
+  const selectedPlaylist = playlists.find(p => p.id === selectedPlaylistId) || playlists[0];
+  res.render('shared-link', { sharedLink, playlists, selectedPlaylistId, examMode: !!selectedPlaylist.exam_mode });
 });
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
@@ -1441,7 +1444,7 @@ app.post('/admin/playlists/:id/delete', requireAdmin, (req, res) => {
 app.post('/admin/settings', requireAdmin, (req, res) => {
   const { compression_codec, compression_bitrate, retention_days, empty_playlist_retention_days,
           webrtc_enabled, passwordless_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from,
-          webauthn_enabled, webauthn_rp_id, webauthn_rp_name, exam_mode } = req.body;
+          webauthn_enabled, webauthn_rp_id, webauthn_rp_name } = req.body;
   stmt.upsertSetting.run('compression_codec',   CODECS.includes(compression_codec) ? compression_codec : 'none');
   stmt.upsertSetting.run('compression_bitrate', compression_bitrate || '128');
   stmt.upsertSetting.run('retention_days',                 retention_days || '30');
@@ -1457,7 +1460,6 @@ app.post('/admin/settings', requireAdmin, (req, res) => {
   stmt.upsertSetting.run('webauthn_enabled', webauthn_enabled === '1' ? '1' : '0');
   stmt.upsertSetting.run('webauthn_rp_id',   (webauthn_rp_id   || '').trim());
   stmt.upsertSetting.run('webauthn_rp_name', (webauthn_rp_name || 'AudioBoard').trim());
-  stmt.upsertSetting.run('exam_mode',        exam_mode         === '1' ? '1' : '0');
   res.redirect('/admin');
 });
 

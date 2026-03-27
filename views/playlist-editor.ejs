@@ -152,6 +152,16 @@
             Autoriser le téléchargement des pistes (page publique)
           </label>
         </div>
+        <div class="form-group">
+          <label style="display:flex; align-items:center; gap:.5rem; cursor:pointer;">
+            <input type="checkbox" name="exam_mode" value="1" <%= playlist.exam_mode ? 'checked' : '' %>>
+            Activer le mode examen
+          </label>
+          <p class="text-muted text-sm" style="margin:.25rem 0 0 1.4rem;">
+            En mode examen, le player est restreint&nbsp;: avance rapide, ralenti et navigation dans la piste sont désactivés.
+            Seuls lecture/pause, piste suivante et piste précédente restent disponibles.
+          </p>
+        </div>
         <% if (playlist.playlist_password) { %>
         <div class="form-group">
           <label style="font-size:.85rem;">Mot de passe actuel</label>

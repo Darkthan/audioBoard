@@ -35,9 +35,7 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
     </div>
 
     <div class="sc-right">
-      <% if (locals.examMode) { %>
-        <span class="sc-exam-badge" title="Mode examen actif — navigation et vitesse désactivées">EXAMEN</span>
-      <% } %>
+      <span class="sc-exam-badge" id="scExamBadge" title="Mode examen actif — navigation et vitesse désactivées" style="display:none;">EXAMEN</span>
       <button class="sc-ctrl-btn" id="scSpeedBtn" title="Vitesse de lecture" style="font-size:.75rem;font-weight:600;min-width:2.8rem;letter-spacing:-.5px;">1×</button>
       <svg class="sc-vol-icon" id="scVolIcon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
         <path id="scVolPath" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
@@ -197,23 +195,37 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
     };
   }
 
-  const EXAM_MODE = window.AB_EXAM_MODE === true;
-
   let speedIdx  = 0;
   const SPEEDS  = [1, 1.25, 1.5, 2, 0.75];
   const speedBtn = document.getElementById('scSpeedBtn');
-  if (EXAM_MODE) {
-    speedBtn.disabled = true;
-    speedBtn.style.opacity = '0.35';
-    speedBtn.style.cursor = 'not-allowed';
-    speedBtn.title = 'Désactivé en mode examen';
-  } else {
-    speedBtn.addEventListener('click', () => {
-      speedIdx = (speedIdx + 1) % SPEEDS.length;
-      audio.playbackRate = SPEEDS[speedIdx];
-      speedBtn.textContent = SPEEDS[speedIdx] + '×';
-    });
+  const examBadge = document.getElementById('scExamBadge');
+
+  // Exam mode state — can be updated dynamically (e.g. shared links with multiple playlists)
+  let examActive = window.AB_EXAM_MODE === true;
+
+  function applyExamMode(active) {
+    examActive = active;
+    speedBtn.disabled = active;
+    speedBtn.style.opacity = active ? '0.35' : '';
+    speedBtn.style.cursor  = active ? 'not-allowed' : '';
+    speedBtn.title = active ? 'Désactivé en mode examen' : 'Vitesse de lecture';
+    if (examBadge) examBadge.style.display = active ? '' : 'none';
+    waveform.style.cursor   = active ? 'default' : '';
+    fsWaveform.style.cursor = active ? 'default' : '';
+    document.getElementById('scMiniProgress').style.cursor = active ? 'default' : '';
   }
+
+  speedBtn.addEventListener('click', () => {
+    if (examActive) return;
+    speedIdx = (speedIdx + 1) % SPEEDS.length;
+    audio.playbackRate = SPEEDS[speedIdx];
+    speedBtn.textContent = SPEEDS[speedIdx] + '×';
+  });
+
+  // Public API — called by shared-link view when switching playlists
+  window.scSetExamMode = applyExamMode;
+
+  applyExamMode(examActive);
 
   const STORAGE_KEY = 'sc_state';
   let saveTimer = null;
@@ -452,21 +464,15 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
 
   // ── Seek ─────────────────────────────────────────────────────────────
   function seekByClick(e) {
-    if (!audio.duration) return;
+    if (examActive || !audio.duration) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     audio.currentTime = ratio * audio.duration;
   }
 
-  if (!EXAM_MODE) {
-    waveform.addEventListener('click', seekByClick);
-    fsWaveform.addEventListener('click', seekByClick);
-    document.getElementById('scMiniProgress').addEventListener('click', seekByClick);
-  } else {
-    waveform.style.cursor = 'default';
-    fsWaveform.style.cursor = 'default';
-    document.getElementById('scMiniProgress').style.cursor = 'default';
-  }
+  waveform.addEventListener('click', seekByClick);
+  fsWaveform.addEventListener('click', seekByClick);
+  document.getElementById('scMiniProgress').addEventListener('click', seekByClick);
 
   // ── Audio events ─────────────────────────────────────────────────────
   function fmt(s) {
