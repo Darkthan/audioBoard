@@ -11,7 +11,7 @@
       display: flex;
       align-items: flex-start;
       justify-content: center;
-      padding: 2rem 1rem 4rem;
+      padding: 2rem 1rem 120px;
     }
     .record-card {
       width: 100%;
@@ -136,19 +136,20 @@
           <div class="record-timer" id="recordTimer">0:00</div>
           <div id="recorderLabel" style="font-size:.85rem; color:var(--text-muted); margin-bottom:1rem;"></div>
           <div class="record-visualizer" id="visualizer">
-            <% for(let i=0;i<20;i++) { %><div class="record-bar"></div><% } %>
+            <% for(let i=0; i<20; i++) { %><div class="record-bar"></div><% } %>
           </div>
           <button id="stopBtn" class="btn" style="width:100%; background:#ef4444; color:#fff; border-color:#ef4444;">
             Arrêter l'enregistrement
           </button>
         </div>
 
-        <!-- État : aperçu -->
-        <div id="state-preview" style="display:none;">
-          <div style="font-size:.85rem; font-weight:600; color:#4ade80; margin-bottom:.75rem; text-align:center;">
-            Enregistrement terminé
+        <!-- État : actions après enregistrement (le player en bas prend le relais) -->
+        <div id="state-actions" style="display:none;">
+          <div style="text-align:center; margin-bottom:1rem;">
+            <div style="font-size:.85rem; font-weight:600; color:#4ade80;">
+              Enregistrement terminé — écoutez via le player avant d'envoyer
+            </div>
           </div>
-          <audio id="previewAudio" controls style="width:100%; margin-bottom:1rem; border-radius:8px;"></audio>
           <div style="display:flex; gap:.5rem;">
             <button id="redoBtn" class="btn" style="flex:1; background:var(--surface-hover);">Recommencer</button>
             <button id="submitBtn" class="btn btn-primary" style="flex:2;">Envoyer</button>
@@ -185,12 +186,39 @@
     </div>
   </div>
 
+  <%- include('partials/audio-player') %>
+
   <script>
+    // Masquer les boutons piste suivante/précédente (inutiles ici)
+    document.getElementById('scPrevBtn').style.display = 'none';
+    document.getElementById('scNextBtn').style.display = 'none';
+    document.getElementById('scFsPrevBtn').style.display = 'none';
+    document.getElementById('scFsNextBtn').style.display = 'none';
+    document.getElementById('scFsShuffleBtn').style.display = 'none';
+    document.getElementById('scFsLoopBtn').style.display = 'none';
+
     const RECORD_TOKEN = '<%= token %>';
+
+    // Identifiant persistant de l'appareil (anti-troll)
+    function getDeviceId() {
+      try {
+        let id = localStorage.getItem('ab_device_id');
+        if (!id) {
+          id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+          });
+          localStorage.setItem('ab_device_id', id);
+        }
+        return id;
+      } catch { return ''; }
+    }
+    const DEVICE_ID = getDeviceId();
 
     let mediaRecorder = null;
     let audioChunks = [];
     let audioBlob = null;
+    let blobUrl = null;
     let stream = null;
     let analyser = null;
     let animFrame = null;
@@ -198,16 +226,16 @@
     let secondsElapsed = 0;
     let savedName = '';
 
-    const nameInput  = document.getElementById('recorderName');
-    const startBtn   = document.getElementById('startBtn');
-    const bars       = document.querySelectorAll('.record-bar');
+    const nameInput = document.getElementById('recorderName');
+    const startBtn  = document.getElementById('startBtn');
+    const bars      = document.querySelectorAll('.record-bar');
 
     nameInput.addEventListener('input', () => {
       startBtn.disabled = !nameInput.value.trim();
     });
 
     function showState(s) {
-      for (const id of ['idle','recording','preview','uploading','done','error'])
+      for (const id of ['idle','recording','actions','uploading','done','error'])
         document.getElementById('state-' + id).style.display = id === s ? '' : 'none';
     }
 
@@ -239,7 +267,7 @@
         return;
       }
 
-      // Visualiseur audio
+      // Visualiseur audio temps réel
       try {
         const ctx = new AudioContext();
         const src = ctx.createMediaStreamSource(stream);
@@ -268,10 +296,19 @@
         cancelAnimationFrame(animFrame);
         clearInterval(timerInterval);
         stream.getTracks().forEach(t => t.stop());
+
         const type = mediaRecorder.mimeType || 'audio/webm';
         audioBlob = new Blob(audioChunks, { type });
-        document.getElementById('previewAudio').src = URL.createObjectURL(audioBlob);
-        showState('preview');
+
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        blobUrl = URL.createObjectURL(audioBlob);
+
+        // Charger dans le player AudioBoard
+        if (window.scLoadPreview) {
+          window.scLoadPreview(blobUrl, savedName);
+        }
+
+        showState('actions');
       };
 
       mediaRecorder.start(100);
@@ -302,6 +339,7 @@
       const fd   = new FormData();
       fd.append('audio', audioBlob, `recording.${ext}`);
       fd.append('recorder_name', savedName);
+      fd.append('device_id', DEVICE_ID);
 
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/record/' + RECORD_TOKEN);

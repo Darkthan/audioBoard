@@ -522,7 +522,7 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
     setPlayingState(true);
     updatePlayBtnExamStyle();
     saveState();
-    if (currentTrack && !audio._scTracked) {
+    if (currentTrack && !audio._scTracked && !currentTrack.preview) {
       audio._scTracked = true;
       fetch(`/api/play/${currentTrack.token}`, { method: 'POST' }).catch(() => {});
     }
@@ -554,6 +554,25 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
     if (audio.volume > 0) { audio.volume = 0; volSlider.value = 0; volPath.setAttribute('d', VOL_MUTE); }
     else { audio.volume = 1; volSlider.value = 1; volPath.setAttribute('d', VOL_HIGH); }
   });
+  // ── API prévisualisation locale (page d'enregistrement) ─────────────
+  window.scLoadPreview = function(blobUrl, name) {
+    currentTrack = { name, token: null, codec: 'none', playlistName: 'Aperçu avant envoi', artist: null, preview: true };
+    currentIdx = -1;
+    updateLabels(currentTrack);
+    const seed = name.split('').reduce((a, c) => a + c.charCodeAt(0), 0) || 42;
+    bars   = buildBars(seed, barsEl);
+    fsBars = buildBars(seed, fsBarsEl);
+    updateBars(0, bars);
+    updateBars(0, fsBars);
+    timeDur.textContent = fsTimeDur.textContent = '—';
+    timeCur.textContent = fsTimeCur.textContent = '0:00';
+    miniFill.style.width = '0%';
+    audio._scTracked = false;
+    player.classList.add('sc-visible');
+    audio.src = blobUrl;
+    audio.load();
+    audio.play().catch(() => {});
+  };
 })();
 </script>
 

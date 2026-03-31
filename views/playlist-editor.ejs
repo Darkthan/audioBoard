@@ -127,6 +127,7 @@
                   <%= (f.size/1048576).toFixed(1) %> Mo
                   <% if (f.compressed) { %> · <span class="badge badge-compressed"><%= (f.codec||'mp3').replace('_live','').toUpperCase() %></span><% } %>
                   <% if (f.expires_at) { %> · Expire le <%= new Date(f.expires_at).toLocaleDateString('fr-FR') %><% } %>
+                  <% if (f.device_id) { %> · <span title="Identifiant appareil : <%= f.device_id %>" style="font-family:monospace; opacity:.6; cursor:help;">📱 <%= f.device_id.slice(-8) %></span><% } %>
                 </span>
               </div>
               <div class="track-actions">

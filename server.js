@@ -213,6 +213,10 @@ db.exec(`
   if (!mtCols.includes('request_id')) db.exec('ALTER TABLE magic_tokens ADD COLUMN request_id TEXT');
   if (!mtCols.includes('consumed'))   db.exec('ALTER TABLE magic_tokens ADD COLUMN consumed INTEGER DEFAULT 0');
 
+  // Device ID column for recordings (anti-troll)
+  const afColsFinal = db.prepare('PRAGMA table_info(audio_files)').all().map(c => c.name);
+  if (!afColsFinal.includes('device_id')) db.exec('ALTER TABLE audio_files ADD COLUMN device_id TEXT');
+
   // Covers directory
   fs.mkdirSync(path.join(UPLOADS_DIR, 'covers'), { recursive: true });
 })();
@@ -312,8 +316,8 @@ const stmt = {
   insertFile: db.prepare(`
     INSERT INTO audio_files
       (original_name,filename,share_token,playlist_id,uploaded_by,position,size,compressed,codec,expires_at,
-       duration,artist,album,title_tag,has_cover,waveform,play_count)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+       duration,artist,album,title_tag,has_cover,waveform,play_count,device_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)
   `),
   updateFilePosition:    db.prepare('UPDATE audio_files SET position=? WHERE id=? AND playlist_id=?'),
   updateFileTitle:       db.prepare('UPDATE audio_files SET title_tag=? WHERE id=?'),
@@ -878,10 +882,16 @@ app.post('/record/:token', uploadRecord.single('audio'), async (req, res) => {
               : 'webm';
     req.file.originalname = `${rawName} - ${timestamp}.${ext}`;
 
+    // Identifiant appareil (anti-troll) — UUID généré côté client, persisté en localStorage
+    const deviceId = /^[0-9a-f-]{8,36}$/i.test(req.body.device_id || '')
+      ? req.body.device_id.trim().slice(0, 36)
+      : null;
+
     const options = {
       retentionDays: parseInt(getSetting('retention_days'), 10),
       codec:         getSetting('compression_codec') || 'none',
       bitrate:       getSetting('compression_bitrate') || '128',
+      deviceId,
     };
     await persistFile(req.file, link.playlist_id, link.owner_id, options);
     res.json({ ok: true });
@@ -1027,7 +1037,7 @@ async function persistFile(file, playlistId, userId, options) {
     file.originalname, finalFilename, shareToken, playlistId, userId,
     position, stats.size, codec !== 'none' ? 1 : 0, codec, expiresAt,
     duration, meta.artist || null, meta.album || null, meta.title || null,
-    hasCover, waveformJson
+    hasCover, waveformJson, options.deviceId || null
   );
   stmt.clearPlaylistEmptySince.run(playlistId);
 }
