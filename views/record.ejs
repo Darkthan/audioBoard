@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= linkName %> — Enregistrement</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .record-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 2rem 1rem 4rem;
+    }
+    .record-card {
+      width: 100%;
+      max-width: 480px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 32px rgba(0,0,0,.45);
+      overflow: hidden;
+    }
+    .record-hero {
+      background: linear-gradient(135deg, #182028 0%, #1e2d3a 100%);
+      padding: 1.75rem 2rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      text-align: center;
+    }
+    .record-brand {
+      display: inline-block;
+      padding: .3rem .7rem;
+      border-radius: 999px;
+      background: rgba(232,93,4,.14);
+      color: #ffb36b;
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      margin-bottom: .85rem;
+    }
+    .record-hero h1 {
+      font-size: 1.4rem;
+      margin: 0;
+      color: var(--text);
+      line-height: 1.3;
+    }
+    .record-body {
+      padding: 1.5rem 2rem 2rem;
+    }
+    .record-timer {
+      font-size: 3rem;
+      font-variant-numeric: tabular-nums;
+      font-weight: 300;
+      letter-spacing: .04em;
+      color: var(--text);
+      line-height: 1;
+      margin: .5rem 0 .75rem;
+    }
+    .record-pulse {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      background: #ef4444;
+      border-radius: 50%;
+      animation: pulse 1s ease-in-out infinite;
+      margin-right: .4rem;
+      vertical-align: middle;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .4; transform: scale(.75); }
+    }
+    .record-visualizer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      height: 48px;
+      margin: .5rem 0 1rem;
+    }
+    .record-bar {
+      width: 4px;
+      background: var(--primary);
+      border-radius: 2px;
+      transition: height .1s ease;
+      min-height: 4px;
+    }
+    .upload-progress-wrap {
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: .75rem;
+    }
+    .upload-progress-bar {
+      height: 100%;
+      background: var(--primary);
+      width: 0%;
+      transition: width .2s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="record-wrap">
+    <div class="record-card">
+      <div class="record-hero">
+        <div class="record-brand">AudioBoard</div>
+        <h1><%= linkName %></h1>
+      </div>
+
+      <div class="record-body">
+
+        <!-- État : formulaire initial -->
+        <div id="state-idle">
+          <div class="form-group" style="margin-bottom:1.25rem;">
+            <label class="form-label" for="recorderName">Votre nom</label>
+            <input type="text" id="recorderName" class="form-control"
+                   placeholder="Entrez votre nom..." maxlength="100" autocomplete="name" autofocus>
+          </div>
+          <button id="startBtn" class="btn btn-primary" style="width:100%;" disabled>
+            Démarrer l'enregistrement
+          </button>
+          <p id="permError" style="display:none; margin-top:.75rem; font-size:.85rem; color:var(--danger); text-align:center;">
+            Impossible d'accéder au microphone. Vérifiez vos permissions.
+          </p>
+        </div>
+
+        <!-- État : enregistrement en cours -->
+        <div id="state-recording" style="display:none; text-align:center;">
+          <div style="margin-bottom:.25rem;">
+            <span class="record-pulse"></span>
+            <span style="font-size:.8rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--danger);">Enregistrement</span>
+          </div>
+          <div class="record-timer" id="recordTimer">0:00</div>
+          <div id="recorderLabel" style="font-size:.85rem; color:var(--text-muted); margin-bottom:1rem;"></div>
+          <div class="record-visualizer" id="visualizer">
+            <% for(let i=0;i<20;i++) { %><div class="record-bar"></div><% } %>
+          </div>
+          <button id="stopBtn" class="btn" style="width:100%; background:#ef4444; color:#fff; border-color:#ef4444;">
+            Arrêter l'enregistrement
+          </button>
+        </div>
+
+        <!-- État : aperçu -->
+        <div id="state-preview" style="display:none;">
+          <div style="font-size:.85rem; font-weight:600; color:#4ade80; margin-bottom:.75rem; text-align:center;">
+            Enregistrement terminé
+          </div>
+          <audio id="previewAudio" controls style="width:100%; margin-bottom:1rem; border-radius:8px;"></audio>
+          <div style="display:flex; gap:.5rem;">
+            <button id="redoBtn" class="btn" style="flex:1; background:var(--surface-hover);">Recommencer</button>
+            <button id="submitBtn" class="btn btn-primary" style="flex:2;">Envoyer</button>
+          </div>
+        </div>
+
+        <!-- État : envoi en cours -->
+        <div id="state-uploading" style="display:none; text-align:center; padding:1.5rem 0;">
+          <div style="font-size:.95rem; margin-bottom:.75rem;">Envoi en cours…</div>
+          <div class="upload-progress-wrap">
+            <div class="upload-progress-bar" id="uploadProgress"></div>
+          </div>
+        </div>
+
+        <!-- État : envoyé avec succès -->
+        <div id="state-done" style="display:none; text-align:center; padding:1.5rem 0;">
+          <div style="font-size:2.5rem; margin-bottom:.5rem; color:#4ade80;">✓</div>
+          <div style="font-size:1.05rem; font-weight:600; margin-bottom:.4rem;">Enregistrement envoyé !</div>
+          <p style="font-size:.85rem; color:var(--text-muted); margin-bottom:1.25rem;">
+            Merci. Vous pouvez fermer cette page ou enregistrer une nouvelle piste.
+          </p>
+          <button id="anotherBtn" class="btn btn-primary">Enregistrer une autre piste</button>
+        </div>
+
+        <!-- État : erreur -->
+        <div id="state-error" style="display:none; text-align:center; padding:1rem 0;">
+          <div style="color:var(--danger); margin-bottom:.75rem; font-size:.9rem;" id="errorMsg">
+            Une erreur est survenue.
+          </div>
+          <button id="retryBtn" class="btn">Réessayer</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const RECORD_TOKEN = '<%= token %>';
+
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let audioBlob = null;
+    let stream = null;
+    let analyser = null;
+    let animFrame = null;
+    let timerInterval = null;
+    let secondsElapsed = 0;
+    let savedName = '';
+
+    const nameInput  = document.getElementById('recorderName');
+    const startBtn   = document.getElementById('startBtn');
+    const bars       = document.querySelectorAll('.record-bar');
+
+    nameInput.addEventListener('input', () => {
+      startBtn.disabled = !nameInput.value.trim();
+    });
+
+    function showState(s) {
+      for (const id of ['idle','recording','preview','uploading','done','error'])
+        document.getElementById('state-' + id).style.display = id === s ? '' : 'none';
+    }
+
+    function fmtTime(s) {
+      return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    }
+
+    function drawBars() {
+      if (!analyser) return;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(data);
+      const step = Math.floor(data.length / bars.length);
+      bars.forEach((bar, i) => {
+        const val = data[i * step] || 0;
+        bar.style.height = Math.max(4, (val / 255) * 44) + 'px';
+      });
+      animFrame = requestAnimationFrame(drawBars);
+    }
+
+    startBtn.addEventListener('click', async () => {
+      const name = nameInput.value.trim();
+      if (!name) return;
+      savedName = name;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      } catch {
+        document.getElementById('permError').style.display = '';
+        return;
+      }
+
+      // Visualiseur audio
+      try {
+        const ctx = new AudioContext();
+        const src = ctx.createMediaStreamSource(stream);
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 64;
+        src.connect(analyser);
+        drawBars();
+      } catch {}
+
+      audioChunks = [];
+      secondsElapsed = 0;
+      document.getElementById('recorderLabel').textContent = name;
+      document.getElementById('recordTimer').textContent = '0:00';
+
+      const mimeType = ['audio/webm;codecs=opus','audio/webm','audio/ogg','audio/mp4']
+        .find(t => MediaRecorder.isTypeSupported(t)) || '';
+
+      try {
+        mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      } catch {
+        mediaRecorder = new MediaRecorder(stream);
+      }
+
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        cancelAnimationFrame(animFrame);
+        clearInterval(timerInterval);
+        stream.getTracks().forEach(t => t.stop());
+        const type = mediaRecorder.mimeType || 'audio/webm';
+        audioBlob = new Blob(audioChunks, { type });
+        document.getElementById('previewAudio').src = URL.createObjectURL(audioBlob);
+        showState('preview');
+      };
+
+      mediaRecorder.start(100);
+      timerInterval = setInterval(() => {
+        secondsElapsed++;
+        document.getElementById('recordTimer').textContent = fmtTime(secondsElapsed);
+      }, 1000);
+
+      showState('recording');
+    });
+
+    document.getElementById('stopBtn').addEventListener('click', () => {
+      mediaRecorder?.stop();
+    });
+
+    document.getElementById('redoBtn').addEventListener('click', () => {
+      audioChunks = [];
+      audioBlob = null;
+      showState('idle');
+    });
+
+    document.getElementById('submitBtn').addEventListener('click', () => {
+      if (!audioBlob) return;
+      showState('uploading');
+
+      const type = audioBlob.type || 'audio/webm';
+      const ext  = type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : 'webm';
+      const fd   = new FormData();
+      fd.append('audio', audioBlob, `recording.${ext}`);
+      fd.append('recorder_name', savedName);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/record/' + RECORD_TOKEN);
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable)
+          document.getElementById('uploadProgress').style.width =
+            Math.round(e.loaded / e.total * 100) + '%';
+      };
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          showState('done');
+        } else {
+          document.getElementById('errorMsg').textContent =
+            'Erreur lors de l\'envoi (code ' + xhr.status + '). Veuillez réessayer.';
+          showState('error');
+        }
+      };
+      xhr.onerror = () => {
+        document.getElementById('errorMsg').textContent = 'Erreur réseau. Vérifiez votre connexion.';
+        showState('error');
+      };
+      xhr.send(fd);
+    });
+
+    document.getElementById('anotherBtn').addEventListener('click', () => {
+      audioChunks = [];
+      audioBlob = null;
+      nameInput.value = savedName;
+      showState('idle');
+    });
+
+    document.getElementById('retryBtn').addEventListener('click', () => {
+      showState('idle');
+    });
+  </script>
+</body>
+</html>

@@ -100,6 +100,26 @@ db.exec(`
     playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
     PRIMARY KEY (shared_link_id, playlist_id)
   );
+
+  CREATE TABLE IF NOT EXISTS invite_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    max_uses INTEGER NOT NULL DEFAULT 10,
+    use_count INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS record_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    playlist_id INTEGER REFERENCES playlists(id) ON DELETE SET NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 db.exec(`
@@ -266,6 +286,12 @@ const stmt = {
   deleteSharedLink:        db.prepare('DELETE FROM shared_links WHERE id = ?'),
   deleteSharedLinkPlaylists: db.prepare('DELETE FROM shared_link_playlists WHERE shared_link_id = ?'),
 
+  insertInviteLink:    db.prepare('INSERT INTO invite_links (token, name, message, max_uses, created_by) VALUES (?, ?, ?, ?, ?)'),
+  getInviteLinkByToken:db.prepare('SELECT * FROM invite_links WHERE token = ?'),
+  getAllInviteLinks:   db.prepare(`SELECT il.*, u.username as creator FROM invite_links il JOIN users u ON u.id = il.created_by ORDER BY il.created_at DESC`),
+  incrementInviteLink: db.prepare('UPDATE invite_links SET use_count = use_count + 1 WHERE id = ?'),
+  deleteInviteLink:    db.prepare('DELETE FROM invite_links WHERE id = ?'),
+
   getFileById:                db.prepare('SELECT id,filename,uploaded_by,playlist_id FROM audio_files WHERE id=?'),
   getFileByToken:             db.prepare('SELECT filename,expires_at,codec FROM audio_files WHERE share_token=?'),
   getFileByTokenWithPlaylist: db.prepare(`
@@ -331,6 +357,20 @@ const stmt = {
   getAllUsersFull:       db.prepare('SELECT id,username,role,email,quota_mb,created_at FROM users ORDER BY created_at'),
   getUserStorageUsed:   db.prepare('SELECT COALESCE(SUM(size),0) as total FROM audio_files WHERE uploaded_by=?'),
   updateUserQuota:      db.prepare('UPDATE users SET quota_mb=? WHERE id=?'),
+
+  insertRecordLink:      db.prepare('INSERT INTO record_links (token, name, owner_id, playlist_id) VALUES (?, ?, ?, ?)'),
+  getRecordLinkByToken:  db.prepare('SELECT * FROM record_links WHERE token = ?'),
+  getRecordLinkById:     db.prepare('SELECT * FROM record_links WHERE id = ?'),
+  getRecordLinksByOwner: db.prepare(`
+    SELECT rl.id, rl.token, rl.name, rl.playlist_id, rl.created_at,
+           p.name as playlist_name, COUNT(af.id) as recording_count
+    FROM record_links rl
+    LEFT JOIN playlists p ON p.id = rl.playlist_id
+    LEFT JOIN audio_files af ON af.playlist_id = rl.playlist_id
+    WHERE rl.owner_id = ?
+    GROUP BY rl.id ORDER BY rl.created_at DESC
+  `),
+  deleteRecordLink:      db.prepare('DELETE FROM record_links WHERE id = ?'),
 };
 
 // ── Default settings & admin ──────────────────────────────────────────────────
@@ -491,6 +531,22 @@ const upload = multer({
     const ext = path.extname(file.originalname).toLowerCase();
     const ok = ['.mp3','.wav','.ogg','.flac','.aac','.m4a','.wma','.webm'].includes(ext);
     cb(ok ? null : new Error('Format non supporté'), ok);
+  },
+  limits: { fileSize: 200 * 1024 * 1024 },
+});
+
+const uploadRecord = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+    filename: (req, file, cb) => {
+      const ext = file.mimetype.includes('ogg') ? '.ogg'
+                : (file.mimetype.includes('mp4') || file.mimetype.includes('m4a')) ? '.m4a'
+                : '.webm';
+      cb(null, `${uuidv4()}${ext}`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    cb(null, file.mimetype.startsWith('audio/') || file.mimetype === 'video/webm');
   },
   limits: { fileSize: 200 * 1024 * 1024 },
 });
@@ -685,10 +741,11 @@ app.get('/', requireAuth, (req, res) => {
   const playlists = user.role === ROLES.ADMIN
     ? stmt.getAllPlaylists.all()
     : stmt.getPlaylistsByOwner.all(user.id);
+  const recordLinks = stmt.getRecordLinksByOwner.all(user.id);
   const userFull  = stmt.getUserFull.get(user.id);
   const quotaMb   = userFull?.quota_mb ?? parseInt(getSetting('default_quota_mb') || '0');
   const storageUsed = quotaMb > 0 ? stmt.getUserStorageUsed.get(user.id).total : 0;
-  res.render('dashboard', { playlists, error: req.query.error || null, quotaMb, storageUsed });
+  res.render('dashboard', { playlists, recordLinks, error: req.query.error || null, quotaMb, storageUsed });
 });
 
 // ── Playlists CRUD ────────────────────────────────────────────────────────────
@@ -765,6 +822,74 @@ app.post('/playlists/:id/reorder', requireAuth, (req, res) => {
   if (!Array.isArray(order)) return res.status(400).json({ error:'order requis' });
   reorderPlaylist(playlist.id, order.map(Number));
   res.json({ ok: true });
+});
+
+// ── Liens d'enregistrement ────────────────────────────────────────────────────
+app.post('/record-links', requireAuth, (req, res) => {
+  const name = (req.body.name || '').trim();
+  if (!name) return res.redirect('/?error=Nom requis');
+  const token = uuidv4();
+  const playlistName = `[Enreg.] ${name}`;
+  let playlistId;
+  try {
+    const r = stmt.insertPlaylist.run(playlistName, req.session.user.id);
+    playlistId = r.lastInsertRowid;
+  } catch {
+    try {
+      const r = stmt.insertPlaylist.run(`${playlistName} (${token.slice(0, 6)})`, req.session.user.id);
+      playlistId = r.lastInsertRowid;
+    } catch (err) {
+      console.error('record-links playlist create:', err);
+      return res.redirect('/?error=Erreur lors de la création');
+    }
+  }
+  stmt.updatePlaylistSettings.run(1, null, 0, playlistId);
+  stmt.insertRecordLink.run(token, name, req.session.user.id, playlistId);
+  res.redirect('/');
+});
+
+app.post('/record-links/:id/delete', requireAuth, (req, res) => {
+  const link = stmt.getRecordLinkById.get(req.params.id);
+  if (!link) return res.redirect('/');
+  if (link.owner_id !== req.session.user.id && req.session.user.role !== ROLES.ADMIN)
+    return res.status(403).render('error', { message: 'Non autorisé', user: req.session.user });
+  stmt.deleteRecordLink.run(link.id);
+  res.redirect('/');
+});
+
+// Page publique d'enregistrement
+app.get('/record/:token', (req, res) => {
+  const link = stmt.getRecordLinkByToken.get(req.params.token);
+  if (!link) return res.status(404).render('error', { message: 'Lien d\'enregistrement invalide ou expiré.', user: req.session.user || null });
+  res.render('record', { linkName: link.name, token: link.token });
+});
+
+app.post('/record/:token', uploadRecord.single('audio'), async (req, res) => {
+  try {
+    const link = stmt.getRecordLinkByToken.get(req.params.token);
+    if (!link || !link.playlist_id) return res.status(404).json({ error: 'Lien invalide' });
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
+
+    const rawName = (req.body.recorder_name || 'Anonyme').trim().slice(0, 100)
+      .replace(/[<>&"'\\\/]/g, '') || 'Anonyme';
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const ext = req.file.mimetype.includes('ogg') ? 'ogg'
+              : (req.file.mimetype.includes('mp4') || req.file.mimetype.includes('m4a')) ? 'm4a'
+              : 'webm';
+    req.file.originalname = `${rawName} - ${timestamp}.${ext}`;
+
+    const options = {
+      retentionDays: parseInt(getSetting('retention_days'), 10),
+      codec:         getSetting('compression_codec') || 'none',
+      bitrate:       getSetting('compression_bitrate') || '128',
+    };
+    await persistFile(req.file, link.playlist_id, link.owner_id, options);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Record upload error:', err);
+    if (req.file) tryUnlink(req.file.path);
+    res.status(500).json({ error: "Erreur lors de l'enregistrement" });
+  }
 });
 
 app.post('/files/:id/rename', requireAuth, (req, res) => {
@@ -1165,6 +1290,7 @@ app.get('/admin', requireAdmin, (req, res) => {
   });
   const settings = {};
   stmt.getAllSettings.all().forEach(s => { settings[s.key] = s.value; });
+  const inviteLinks = stmt.getAllInviteLinks.all();
 
   // Stats utilisation par user
   const usersWithStorage = users.map(u => ({
@@ -1173,7 +1299,7 @@ app.get('/admin', requireAdmin, (req, res) => {
   }));
 
   res.render('admin', {
-    users: usersWithStorage, playlists, sharedLinks, settings,
+    users: usersWithStorage, playlists, sharedLinks, settings, inviteLinks,
     stats: {
       totalFiles: stmt.countFiles.get().c,
       totalSize:  stmt.sumFileSize.get().s,
@@ -1256,6 +1382,128 @@ app.post('/admin/users/:id/update', requireAdmin, (req, res) => {
     if (newPassword) stmt.updateUserPassword.run(bcrypt.hashSync(newPassword, 10), userId);
   })();
   res.redirect('/admin');
+});
+
+// ── Invite links ──────────────────────────────────────────────────────────────
+app.post('/admin/invite-links', requireAdmin, (req, res) => {
+  const name    = (req.body.name    || '').trim();
+  const message = (req.body.message || '').trim();
+  const maxUses = Math.max(1, parseInt(req.body.max_uses, 10) || 10);
+  if (!name) return res.redirect('/admin?error=Nom du lien d\'invitation requis');
+  stmt.insertInviteLink.run(uuidv4(), name, message, maxUses, req.session.user.id);
+  res.redirect('/admin');
+});
+
+app.post('/admin/invite-links/:id/delete', requireAdmin, (req, res) => {
+  stmt.deleteInviteLink.run(parseInt(req.params.id, 10));
+  res.redirect('/admin');
+});
+
+app.get('/invite/:token', (req, res) => {
+  if (req.session.user) return res.redirect('/');
+  const link = stmt.getInviteLinkByToken.get(req.params.token);
+  if (!link || link.use_count >= link.max_uses) {
+    return res.render('error', { message: 'Ce lien d\'invitation est invalide ou épuisé.', user: null });
+  }
+  res.render('invite', { link, error: null, confirmed: false, confirmedEmail: null });
+});
+
+app.post('/invite/:token', async (req, res) => {
+  const link = stmt.getInviteLinkByToken.get(req.params.token);
+  if (!link || link.use_count >= link.max_uses) {
+    return res.render('error', { message: 'Ce lien d\'invitation est invalide ou épuisé.', user: null });
+  }
+
+  const render = (error) => res.render('invite', { link, error, confirmed: false, confirmedEmail: null });
+
+  const username = (req.body.username || '').trim();
+  const email    = (req.body.email    || '').trim().toLowerCase() || null;
+  const password = (req.body.password || '').trim();
+  const passwordlessEnabled = getSetting('passwordless_enabled') === '1';
+
+  if (!username || username.length < 2)
+    return render('Le nom d\'utilisateur doit faire au moins 2 caractères.');
+  if (!/^[a-zA-Z0-9_\-\.]+$/.test(username))
+    return render('Le nom d\'utilisateur ne peut contenir que des lettres, chiffres, _ - .');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    return render('Adresse email invalide.');
+  if (!email && !password)
+    return render('Renseignez votre email ou définissez un mot de passe.');
+  if (!password && !passwordlessEnabled)
+    return render('La connexion sans mot de passe n\'est pas activée. Définissez un mot de passe.');
+  if (password && password.length < 8)
+    return render('Le mot de passe doit faire au moins 8 caractères.');
+
+  try {
+    const passwordHash = password ? bcrypt.hashSync(password, 10) : bcrypt.hashSync(uuidv4(), 10);
+    const result = stmt.insertUser.run(username, passwordHash, ROLES.UPLOADER, email);
+    const newUserId = result.lastInsertRowid;
+    stmt.incrementInviteLink.run(link.id);
+
+    // Si pas de mot de passe mais email + magic link activé → envoyer un lien de connexion
+    if (!password && email && passwordlessEnabled) {
+      const magicToken = uuidv4();
+      const requestId  = uuidv4();
+      const expiresAt  = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      stmt.insertMagicToken.run(newUserId, magicToken, expiresAt, requestId);
+      req.session.magicRequestId = requestId;
+
+      const magicUrl = `${req.protocol}://${req.get('host')}/login/magic/${magicToken}`;
+      const safeUser = escXml(username);
+      const safeUrl  = escXml(magicUrl);
+      const transporter = createTransporter();
+      if (transporter) {
+        try {
+          await transporter.sendMail({
+            from:    getSetting('smtp_from') || getSetting('smtp_user'),
+            to:      email,
+            subject: 'Bienvenue sur AudioBoard — Votre lien de connexion',
+            text:    `Bonjour ${username},\n\nVotre compte AudioBoard a bien été créé !\n\nCliquez sur le lien ci-dessous pour vous connecter :\n${magicUrl}\n\nCe lien est valable 15 minutes.`,
+            html: `<!DOCTYPE html>
+<html lang="fr">
+<body style="margin:0;padding:0;background:#0f1418;font-family:Arial,Helvetica,sans-serif;color:#e5edf4;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0f1418;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#171d23;border:1px solid #2a323b;border-radius:20px;overflow:hidden;">
+        <tr><td style="padding:32px 32px 20px;background:linear-gradient(135deg,#171d23 0%,#202932 100%);">
+          <div style="display:inline-block;padding:6px 10px;border-radius:999px;background:rgba(232,93,4,0.12);color:#ffb36b;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;">AudioBoard</div>
+          <h1 style="margin:18px 0 12px;font-size:26px;line-height:1.2;color:#ffffff;">Bienvenue, ${safeUser}&nbsp;! 🎉</h1>
+          <p style="margin:0;font-size:15px;line-height:1.7;color:#b7c2cc;">Votre compte a été créé avec succès. Cliquez sur le bouton ci-dessous pour vous connecter.</p>
+        </td></tr>
+        <tr><td style="padding:0 32px 32px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:20px;background:#12171c;border:1px solid #2a323b;border-radius:16px;">
+            <tr><td style="padding:24px;text-align:center;">
+              <a href="${safeUrl}" style="display:inline-block;padding:14px 24px;background:#e85d04;color:#ffffff;text-decoration:none;border-radius:12px;font-size:16px;font-weight:700;">Accéder à AudioBoard</a>
+              <p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#96a2ad;">Ce lien expire dans <strong style="color:#ffffff;">15 minutes</strong>.</p>
+            </td></tr>
+          </table>
+          <p style="margin:20px 0 8px;font-size:13px;color:#96a2ad;">Si le bouton ne fonctionne pas, copiez ce lien :</p>
+          <p style="margin:0;padding:14px 16px;background:#12171c;border:1px solid #2a323b;border-radius:12px;word-break:break-all;font-size:13px;color:#d8e0e7;">
+            <a href="${safeUrl}" style="color:#ffb36b;text-decoration:none;">${safeUrl}</a>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+          });
+        } catch (err) {
+          console.error('Invite magic link email error:', err.message);
+        }
+      }
+      return res.render('invite', { link, error: null, confirmed: true, confirmedEmail: email });
+    }
+
+    // Connexion directe si mot de passe fourni
+    req.session.user = { id: newUserId, username, role: ROLES.UPLOADER };
+    res.redirect('/');
+  } catch (err) {
+    if (err.message?.includes('UNIQUE'))
+      return render('Ce nom d\'utilisateur est déjà pris. Choisissez-en un autre.');
+    console.error('Invite registration error:', err);
+    render('Erreur lors de la création du compte. Réessayez.');
+  }
 });
 
 // ── Profile ───────────────────────────────────────────────────────────────────
