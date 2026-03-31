@@ -58,6 +58,7 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
         <span class="sc-mini-name" id="scMiniName">—</span>
         <span class="sc-mini-pl" id="scMiniPl">—</span>
       </div>
+      <span class="sc-mini-exam-dot" id="scMiniExamDot" title="Mode examen actif" style="display:none;">●</span>
       <button class="sc-mini-expand-btn" id="scMiniExpandBtn" title="Agrandir">
         <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
       </button>
@@ -73,6 +74,7 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
     </button>
     <div class="sc-fs-meta">
       <span class="sc-fs-pl" id="scFsPl">—</span>
+      <span class="sc-fs-exam-badge" id="scFsExamBadge" title="Mode examen actif" style="display:none;">EXAMEN</span>
     </div>
   </div>
 
@@ -197,8 +199,10 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
 
   let speedIdx  = 0;
   const SPEEDS  = [1, 1.25, 1.5, 2, 0.75];
-  const speedBtn = document.getElementById('scSpeedBtn');
-  const examBadge = document.getElementById('scExamBadge');
+  const speedBtn    = document.getElementById('scSpeedBtn');
+  const examBadge   = document.getElementById('scExamBadge');
+  const miniExamDot = document.getElementById('scMiniExamDot');
+  const fsExamBadge = document.getElementById('scFsExamBadge');
 
   // Exam mode state — can be updated dynamically (e.g. shared links with multiple playlists)
   let examActive = window.AB_EXAM_MODE === true;
@@ -209,10 +213,22 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
     speedBtn.style.opacity = active ? '0.35' : '';
     speedBtn.style.cursor  = active ? 'not-allowed' : '';
     speedBtn.title = active ? 'Désactivé en mode examen' : 'Vitesse de lecture';
-    if (examBadge) examBadge.style.display = active ? '' : 'none';
+    if (examBadge)   examBadge.style.display   = active ? '' : 'none';
+    if (miniExamDot) miniExamDot.style.display  = active ? '' : 'none';
+    if (fsExamBadge) fsExamBadge.style.display  = active ? '' : 'none';
     waveform.style.cursor   = active ? 'default' : '';
     fsWaveform.style.cursor = active ? 'default' : '';
     document.getElementById('scMiniProgress').style.cursor = active ? 'default' : '';
+    // Mettre à jour le curseur des boutons lecture selon l'état courant
+    updatePlayBtnExamStyle();
+  }
+
+  function updatePlayBtnExamStyle() {
+    const blockPause = examActive && !audio.paused;
+    [playBtn, miniPlayBtn, fsPlayBtn].forEach(btn => {
+      btn.style.cursor = blockPause ? 'not-allowed' : '';
+      btn.title = blockPause ? 'Pause désactivée en mode examen' : 'Lecture / Pause';
+    });
   }
 
   speedBtn.addEventListener('click', () => {
@@ -416,7 +432,7 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
   window.scPlay = function(token) {
     const idx = tracks.findIndex(t => t.token === token);
     if (idx === -1) return;
-    if (idx === currentIdx && !audio.paused) { audio.pause(); return; }
+    if (idx === currentIdx && !audio.paused) { if (!examActive) audio.pause(); return; }
     loadTrack(idx, true);
   };
 
@@ -440,7 +456,7 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
   function togglePlay() {
     if (currentIdx === -1 && tracks.length) { loadTrack(0, true); return; }
     if (audio.paused) audio.play().catch(() => {});
-    else audio.pause();
+    else if (!examActive) audio.pause();
   }
 
   playBtn.addEventListener('click', togglePlay);
@@ -504,13 +520,14 @@ window.AB_EXAM_MODE = <%= locals.examMode ? 'true' : 'false' %>;</script>
   });
   audio.addEventListener('play', () => {
     setPlayingState(true);
+    updatePlayBtnExamStyle();
     saveState();
     if (currentTrack && !audio._scTracked) {
       audio._scTracked = true;
       fetch(`/api/play/${currentTrack.token}`, { method: 'POST' }).catch(() => {});
     }
   });
-  audio.addEventListener('pause', () => { setPlayingState(false); saveState(); });
+  audio.addEventListener('pause', () => { setPlayingState(false); updatePlayBtnExamStyle(); saveState(); });
   audio.addEventListener('ended', () => {
     audio._scTracked = false;
     if (loopMode) { audio.currentTime = 0; audio.play().catch(() => {}); }

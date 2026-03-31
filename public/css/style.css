@@ -1107,6 +1107,29 @@ tr:hover td { background: rgba(99, 102, 241, 0.05); }
   white-space: nowrap;
 }
 
+/* Mini-player exam dot */
+.sc-mini-exam-dot {
+  font-size: .55rem;
+  color: var(--warning, #f59e0b);
+  flex-shrink: 0;
+  line-height: 1;
+  align-self: center;
+  margin-right: .1rem;
+}
+
+/* Fullscreen exam badge */
+.sc-fs-exam-badge {
+  font-size: .6rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: #fff;
+  background: var(--warning, #f59e0b);
+  border-radius: 4px;
+  padding: .1rem .35rem;
+  margin-left: .5rem;
+  vertical-align: middle;
+}
+
 .sc-vol-icon {
   color: var(--text-muted);
   cursor: pointer;
