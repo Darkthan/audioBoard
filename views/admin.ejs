@@ -331,6 +331,101 @@
         <% } %>
       </div>
 
+      <!-- Liens d'invitation -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <div class="card-title">Liens d'invitation</div>
+        <p class="text-muted text-sm" style="margin:0 0 1rem;">
+          Générez un lien permettant à de nouveaux utilisateurs de créer leur compte de manière autonome.
+          Chaque lien peut être limité en nombre d'inscriptions.
+        </p>
+
+        <!-- Formulaire de création -->
+        <form method="POST" action="/admin/invite-links" style="margin-bottom:1.5rem;">
+          <div style="display:grid; grid-template-columns:1fr auto; gap:.5rem; align-items:start;">
+            <div class="form-group" style="margin:0;">
+              <label style="font-size:.8rem;">Nom du lien <span class="text-muted">(référence interne)</span></label>
+              <input type="text" name="name" class="form-control" placeholder="ex : Promotion 2025, Nouvel élève…" required>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label style="font-size:.8rem;">Utilisations max</label>
+              <input type="number" name="max_uses" class="form-control" value="1" min="1" style="width:90px;" title="1 = lien à usage unique">
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:.5rem;">
+            <label style="font-size:.8rem;">Message d'accueil <span class="text-muted">(affiché sur la page d'inscription)</span></label>
+            <textarea name="message" class="form-control" rows="5" placeholder="Décrivez le contexte, comment utiliser la plateforme…" style="resize:vertical;">Bienvenue sur AudioBoard !
+
+Cette plateforme vous permet d'écouter vos ressources audio depuis n'importe quel appareil, directement dans votre navigateur, sans installation.
+
+Vous trouverez ici vos playlists partagées, organisées et accessibles à tout moment. Créez simplement votre compte pour commencer.</textarea>
+            <p class="text-muted text-sm" style="margin:.25rem 0 0;">Ce message sera affiché à l'utilisateur sur la page de création de compte.</p>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">Créer le lien d'invitation</button>
+        </form>
+
+        <!-- Liste des liens existants -->
+        <% if (!inviteLinks.length) { %>
+          <p class="text-muted text-sm">Aucun lien d'invitation créé pour l'instant.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nom</th>
+                  <th>État</th>
+                  <th>Créé par</th>
+                  <th>Créé le</th>
+                  <th>Lien</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <% inviteLinks.forEach(inv => {
+                  const exhausted = inv.use_count >= inv.max_uses;
+                  const singleUse = inv.max_uses === 1;
+                %>
+                  <tr>
+                    <td>
+                      <%= inv.name %>
+                      <% if (singleUse) { %>
+                        <span class="badge" style="background:rgba(99,102,241,.15);color:#818cf8;margin-left:.3rem;">Usage unique</span>
+                      <% } %>
+                    </td>
+                    <td>
+                      <% if (exhausted) { %>
+                        <span class="badge" style="background:rgba(239,68,68,.12);color:var(--danger);">Épuisé</span>
+                        <% if (inv.used_by_username) { %>
+                          <span class="text-muted text-sm" style="margin-left:.3rem;">par <strong><%= inv.used_by_username %></strong></span>
+                        <% } %>
+                      <% } else { %>
+                        <span class="badge" style="background:rgba(74,222,128,.1);color:#4ade80;">Actif</span>
+                        <% if (inv.max_uses > 1) { %>
+                          <span class="text-muted text-sm" style="margin-left:.3rem;"><%= inv.use_count %>/<%= inv.max_uses %></span>
+                        <% } %>
+                      <% } %>
+                    </td>
+                    <td class="text-muted"><%= inv.creator %></td>
+                    <td class="text-muted"><%= new Date(inv.created_at).toLocaleDateString('fr-FR') %></td>
+                    <td>
+                      <% if (!exhausted) { %>
+                        <button class="copy-btn" onclick="copyInviteLink('<%= inv.token %>')">Copier</button>
+                      <% } %>
+                      <span class="text-muted text-sm link-token" style="margin-left:.3rem;">/invite/<%= inv.token.slice(0,8) %>…</span>
+                    </td>
+                    <td>
+                      <form method="POST" action="/admin/invite-links/<%= inv.id %>/delete" style="display:inline;"
+                            onsubmit="return confirm('Supprimer ce lien d\'invitation ?')">
+                        <button type="submit" class="btn btn-danger btn-sm">Suppr.</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </div>
+
       <!-- Toutes les playlists -->
       <div class="card" style="grid-column: 1 / -1;">
         <div class="card-title">Toutes les playlists</div>

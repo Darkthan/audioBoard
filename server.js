@@ -213,6 +213,10 @@ db.exec(`
   if (!mtCols.includes('request_id')) db.exec('ALTER TABLE magic_tokens ADD COLUMN request_id TEXT');
   if (!mtCols.includes('consumed'))   db.exec('ALTER TABLE magic_tokens ADD COLUMN consumed INTEGER DEFAULT 0');
 
+  // Traçabilité des liens d'invitation — qui a utilisé le lien
+  const ilCols = db.prepare('PRAGMA table_info(invite_links)').all().map(c => c.name);
+  if (!ilCols.includes('used_by')) db.exec('ALTER TABLE invite_links ADD COLUMN used_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+
   // Device ID column for recordings (anti-troll)
   const afColsFinal = db.prepare('PRAGMA table_info(audio_files)').all().map(c => c.name);
   if (!afColsFinal.includes('device_id')) db.exec('ALTER TABLE audio_files ADD COLUMN device_id TEXT');
@@ -292,8 +296,14 @@ const stmt = {
 
   insertInviteLink:    db.prepare('INSERT INTO invite_links (token, name, message, max_uses, created_by) VALUES (?, ?, ?, ?, ?)'),
   getInviteLinkByToken:db.prepare('SELECT * FROM invite_links WHERE token = ?'),
-  getAllInviteLinks:   db.prepare(`SELECT il.*, u.username as creator FROM invite_links il JOIN users u ON u.id = il.created_by ORDER BY il.created_at DESC`),
-  incrementInviteLink: db.prepare('UPDATE invite_links SET use_count = use_count + 1 WHERE id = ?'),
+  getAllInviteLinks:   db.prepare(`
+    SELECT il.*, u.username as creator, ub.username as used_by_username
+    FROM invite_links il
+    JOIN users u ON u.id = il.created_by
+    LEFT JOIN users ub ON ub.id = il.used_by
+    ORDER BY il.created_at DESC
+  `),
+  incrementInviteLink: db.prepare('UPDATE invite_links SET use_count = use_count + 1, used_by = COALESCE(used_by, ?) WHERE id = ?'),
   deleteInviteLink:    db.prepare('DELETE FROM invite_links WHERE id = ?'),
 
   getFileById:                db.prepare('SELECT id,filename,uploaded_by,playlist_id FROM audio_files WHERE id=?'),
@@ -1448,7 +1458,7 @@ app.post('/invite/:token', async (req, res) => {
     const passwordHash = password ? bcrypt.hashSync(password, 10) : bcrypt.hashSync(uuidv4(), 10);
     const result = stmt.insertUser.run(username, passwordHash, ROLES.UPLOADER, email);
     const newUserId = result.lastInsertRowid;
-    stmt.incrementInviteLink.run(link.id);
+    stmt.incrementInviteLink.run(newUserId, link.id);
 
     // Si pas de mot de passe mais email + magic link activé → envoyer un lien de connexion
     if (!password && email && passwordlessEnabled) {
