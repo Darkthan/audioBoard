@@ -477,6 +477,9 @@ Vous trouverez ici vos playlists partagées, organisées et accessibles à tout 
     function copySharedLink(token) {
       navigator.clipboard.writeText(location.origin + '/l/' + token).then(() => alert('Lien copié !'));
     }
+    function copyInviteLink(token) {
+      navigator.clipboard.writeText(location.origin + '/invite/' + token).then(() => alert('Lien d\'invitation copié !'));
+    }
     const filterInput = document.querySelector('.shared-playlist-filter');
     const playlistLabels = document.querySelectorAll('.playlist-checkbox');
     function applyPlaylistFilter(term) {
