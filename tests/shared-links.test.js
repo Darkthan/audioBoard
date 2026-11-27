@@ -71,6 +71,18 @@ test('shared menus navigate to listening and recording pages, with independent a
     assert.equal(response.status(), 200);
     await page.goto(base + '/l/' + link.token);
     assert.equal(await page.locator('a.sl-pl-card').count(), 2);
+    if (process.env.AUDIOBOARD_SCREENSHOT_DIR) {
+      const screenshots = process.env.AUDIOBOARD_SCREENSHOT_DIR;
+      fs.mkdirSync(screenshots, { recursive: true });
+      await page.screenshot({ path: path.join(screenshots, 'shared-menu-desktop.png'), fullPage: true });
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.screenshot({ path: path.join(screenshots, 'shared-menu-mobile.png'), fullPage: true });
+      await page.goto(base + '/admin');
+      await page.locator('.shared-links-section').screenshot({ path: path.join(screenshots, 'shared-admin-mobile.png') });
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.locator('.shared-links-section').screenshot({ path: path.join(screenshots, 'shared-admin-desktop.png') });
+      await page.goto(base + '/l/' + link.token);
+    }
     await page.locator('#destinationSearch').fill('enregistrement');
     assert.equal(await page.locator('a.sl-pl-card:visible').count(), 1);
     await page.locator('a.sl-pl-card:visible').click();

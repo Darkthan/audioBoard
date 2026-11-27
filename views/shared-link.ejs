@@ -9,34 +9,43 @@
 </head>
 <body>
   <main class="container sl-menu">
-    <header class="sl-header"><div>
+    <div class="sl-brand" aria-label="AudioBoard">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4m4-8v12m4-15v18m4-15v12m4-8v4"/></svg>
+      Audio<span>Board</span>
+    </div>
+    <header class="sl-header">
+      <p class="sl-eyebrow">Votre espace audio</p>
       <h1><%= sharedLink.name %></h1>
-      <p class="text-muted">Choisissez une playlist à écouter ou une page pour vous enregistrer.</p>
-    </div></header>
+      <p class="sl-intro">Une playlist à écouter, un enregistrement à partager. Choisissez votre espace.</p>
+    </header>
     <% if (destinations.length) { %>
-      <label for="destinationSearch">Rechercher une playlist ou un enregistrement</label>
-      <input id="destinationSearch" type="search" class="form-control" placeholder="Rechercher par nom ou par type">
-      <p class="text-muted text-sm" id="destinationCount" role="status"><%= destinations.length %> lien(s) proposé(s)</p>
+      <div class="sl-toolbar">
+        <div class="sl-search">
+          <label class="sl-visually-hidden" for="destinationSearch">Rechercher une playlist ou un enregistrement</label>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+          <input id="destinationSearch" type="search" class="form-control" placeholder="Rechercher une playlist, un enregistrement…" autocomplete="off">
+        </div>
+        <p class="sl-result-count" id="destinationCount" role="status"><%= destinations.length %> espace<%= destinations.length > 1 ? 's' : '' %></p>
+      </div>
       <nav class="sl-grid" aria-label="Playlists et enregistrements">
         <% destinations.forEach(d => { %>
           <% if (d.href) { %>
-            <a class="sl-pl-card" href="<%= d.href %>" data-search="<%= d.name + ' ' + d.type %>">
-              <span class="sl-pl-card-meta"><%= d.type %></span>
-              <span class="sl-pl-card-name"><%= d.name %></span>
-              <span class="sl-pl-card-action"><%= d.type === 'Écoute' ? 'Ouvrir la playlist' : 'Ouvrir l’enregistrement' %> →</span>
+            <a class="sl-pl-card <%= d.type === 'Enregistrement' ? 'sl-pl-card--record' : '' %>" href="<%= d.href %>" data-search="<%= d.name + ' ' + d.type %>">
+              <%- include('partials/shared-link-tile', { destination: d }) %>
             </a>
           <% } else { %>
             <div class="sl-pl-card sl-pl-card--unavailable" data-search="<%= d.name + ' ' + d.type %>">
-              <span class="sl-pl-card-meta"><%= d.type %></span>
-              <span class="sl-pl-card-name"><%= d.name %></span>
-              <span class="text-muted text-sm">Lien d’écoute indisponible</span>
+              <%- include('partials/shared-link-tile', { destination: d }) %>
             </div>
           <% } %>
         <% }) %>
       </nav>
-      <p id="destinationEmpty" class="text-muted" hidden>Aucun lien ne correspond à votre recherche.</p>
+      <div id="destinationEmpty" class="sl-empty" hidden>
+        <h2>Aucun résultat</h2>
+        <p>Essayez un autre nom ou recherchez « écoute » ou « enregistrement ».</p>
+      </div>
     <% } else { %>
-      <div class="card"><p class="text-muted">Aucune playlist ni page d’enregistrement disponible pour le moment.</p></div>
+      <div class="sl-empty"><h2>À bientôt ici</h2><p>Aucune playlist ni page d’enregistrement disponible pour le moment.</p></div>
     <% } %>
   </main>
   <script>
@@ -48,7 +57,7 @@
         card.hidden = !normalize(card.dataset.search).includes(normalize(search.value.trim()));
         if (!card.hidden) count++;
       });
-      document.getElementById('destinationCount').textContent = count + ' résultat(s)';
+      document.getElementById('destinationCount').textContent = count + ' espace' + (count > 1 ? 's' : '');
       document.getElementById('destinationEmpty').hidden = count > 0;
     });
   </script>

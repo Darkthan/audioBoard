@@ -1,0 +1,19 @@
+<% const recording = destination.type === 'Enregistrement'; %>
+<div class="sl-pl-card-top">
+  <span class="sl-pl-icon" aria-hidden="true">
+    <% if (recording) { %>
+      <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3m-4 0h8"/></svg>
+    <% } else { %>
+      <svg viewBox="0 0 24 24"><path d="M4 14v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="12" width="4" height="8" rx="2"/><rect x="17" y="12" width="4" height="8" rx="2"/></svg>
+    <% } %>
+  </span>
+  <span class="sl-pl-card-meta"><%= destination.type %></span>
+</div>
+<h2 class="sl-pl-card-name"><%= destination.name %></h2>
+<p class="sl-pl-description"><%= recording ? 'Votre espace pour prendre la parole.' : 'Retrouvez les pistes de cette playlist.' %></p>
+<div class="sl-pl-card-footer">
+  <span class="sl-pl-card-action"><%= destination.href ? (recording ? 'S’enregistrer' : 'Ouvrir la playlist') : 'Lien d’écoute indisponible' %></span>
+  <% if (destination.href) { %>
+    <span class="sl-pl-arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></span>
+  <% } %>
+</div>

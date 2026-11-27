@@ -268,7 +268,13 @@
       </div>
 
       <div class="card shared-links-section span-full">
-        <div class="card-title">Liens permanents multi-playlists</div>
+        <div class="shared-section-heading">
+          <div>
+            <h2 class="card-title">Liens permanents multi-playlists</h2>
+            <p class="text-muted text-sm">Un seul menu pour vos playlists et vos pages d’enregistrement.</p>
+          </div>
+          <span class="shared-section-count"><%= sharedLinks.length %> lien<%= sharedLinks.length > 1 ? 's' : '' %></span>
+        </div>
         <form method="POST" action="/admin/shared-links" class="shared-link-create vertical">
           <div class="form-group">
             <label for="shared_link_name">Nom du lien</label>
@@ -285,13 +291,17 @@
           <div class="shared-link-list">
             <% sharedLinks.forEach(link => { %>
               <div class="shared-link-list-item">
-                <div>
-                  <div class="card-title" style="margin-bottom:.25rem;"><%= link.name %></div>
-                  <p class="text-muted text-sm" style="margin:0;">
-                    <%= link.playlists.length %> playlist(s) · <%= link.records.length %> enregistrement(s) · créé le <%= new Date(link.created_at).toLocaleDateString('fr-FR') %>
-                  </p>
-                  <p class="text-muted text-sm link-token">/l/<%= link.token %></p>
+                <div class="shared-link-card-header">
+                  <div>
+                    <h3 class="card-title"><%= link.name %></h3>
+                    <p class="shared-link-summary">
+                      <span><%= link.playlists.length %> playlist<%= link.playlists.length > 1 ? 's' : '' %></span>
+                      <span><%= link.records.length %> enregistrement<%= link.records.length > 1 ? 's' : '' %></span>
+                    </p>
+                  </div>
+                  <span class="shared-link-date">Créé le <%= new Date(link.created_at).toLocaleDateString('fr-FR') %></span>
                 </div>
+                <p class="link-token">/l/<%= link.token %></p>
                 <div class="shared-link-actions">
                   <button type="button" class="copy-btn" onclick="copySharedLink('<%= link.token %>')">Copier</button>
                   <a class="copy-btn" href="/l/<%= link.token %>" target="_blank" rel="noopener">Ouvrir le menu</a>
