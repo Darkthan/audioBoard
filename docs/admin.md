@@ -213,6 +213,14 @@ La section **Toutes les playlists** liste l'ensemble des playlists de tous les u
 | **Copier** | Copie l'URL dans le presse-papiers |
 | **Révoquer** | Désactive immédiatement le lien — les personnes qui l'ont peuvent encore l'utiliser jusqu'à la révocation |
 
+### Liens permanents multi-playlists
+
+Créez un lien nommé, puis cochez les pages à proposer : playlists d’écoute et/ou liens d’enregistrement existants. La recherche porte sur le nom, le propriétaire et le type. Les choix restent cochés pendant une recherche ; le compteur indique la sélection totale. **Sélectionner les résultats** ajoute les éléments visibles, **Tout désélectionner** vide la sélection.
+
+Le lien `/l/...` ouvre toujours un menu, même avec un seul choix. Chaque carte mène à la page habituelle `/playlist/...` ou `/record/...`. Les protections par mot de passe et les réglages de lecture restent ceux de chaque playlist. Une playlist sélectionnée pour l’écoute reçoit un lien public si elle n’en a pas encore.
+
+**Modifier la sélection** permet de changer les destinations en conservant l’adresse du menu. **Ouvrir le menu** permet de le vérifier. Un lien d’écoute révoqué apparaît comme indisponible ; les pages supprimées disparaissent du menu.
+
 ### Supprimer une playlist
 
 Cliquez **Suppr.** et confirmez.

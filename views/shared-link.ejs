@@ -8,139 +8,49 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <div class="container" style="max-width:900px; padding-bottom:100px;">
-
-    <!-- ── Vue 1 : sélection de playlist ─────────────────────────────── -->
-    <div id="viewSelect">
-      <div class="sl-header">
-        <div>
-          <h1 style="font-size:1.6rem; margin:0 0 0.25rem;"><%= sharedLink.name %></h1>
-          <p class="text-muted text-sm" style="margin:0;">
-            <%= playlists.length %> playlist<%= playlists.length !== 1 ? 's' : '' %> disponible<%= playlists.length !== 1 ? 's' : '' %>
-          </p>
-        </div>
-      </div>
-
-      <div class="sl-grid">
-        <% playlists.forEach(playlist => { %>
-          <div class="sl-pl-card" data-playlist-id="<%= playlist.id %>">
-            <div class="sl-pl-card-name"><%= playlist.name %></div>
-            <div class="sl-pl-card-meta">
-              <%= playlist.files.length %> piste<%= playlist.files.length !== 1 ? 's' : '' %>
-            </div>
-          </div>
-        <% }) %>
-      </div>
-    </div>
-
-    <!-- ── Vue 2 : pistes de la playlist ─────────────────────────────── -->
-    <div id="viewTrack" style="display:none;">
-      <div class="sl-header">
-        <% if (playlists.length > 1) { %>
-          <button class="sl-back-btn" id="slBackBtn">
-            ← Retour
-          </button>
-        <% } %>
-        <div>
-          <h1 id="slPlaylistTitle" style="font-size:1.4rem; margin:0 0 0.2rem;"></h1>
-          <p id="slPlaylistMeta" class="text-muted text-sm" style="margin:0;"></p>
-        </div>
-      </div>
-
-      <% playlists.forEach(playlist => { %>
-        <div class="card sl-track-panel" data-panel-id="<%= playlist.id %>" style="display:none;">
-          <% if (!playlist.files.length) { %>
-            <p class="text-muted">Cette playlist ne contient aucune piste disponible.</p>
+  <main class="container sl-menu">
+    <header class="sl-header"><div>
+      <h1><%= sharedLink.name %></h1>
+      <p class="text-muted">Choisissez une playlist à écouter ou une page pour vous enregistrer.</p>
+    </div></header>
+    <% if (destinations.length) { %>
+      <label for="destinationSearch">Rechercher une playlist ou un enregistrement</label>
+      <input id="destinationSearch" type="search" class="form-control" placeholder="Rechercher par nom ou par type">
+      <p class="text-muted text-sm" id="destinationCount" role="status"><%= destinations.length %> lien(s) proposé(s)</p>
+      <nav class="sl-grid" aria-label="Playlists et enregistrements">
+        <% destinations.forEach(d => { %>
+          <% if (d.href) { %>
+            <a class="sl-pl-card" href="<%= d.href %>" data-search="<%= d.name + ' ' + d.type %>">
+              <span class="sl-pl-card-meta"><%= d.type %></span>
+              <span class="sl-pl-card-name"><%= d.name %></span>
+              <span class="sl-pl-card-action"><%= d.type === 'Écoute' ? 'Ouvrir la playlist' : 'Ouvrir l’enregistrement' %> →</span>
+            </a>
           <% } else { %>
-            <ul class="track-list">
-              <% playlist.files.forEach((f, idx) => { %>
-                <li class="track-item track-item-public" data-sc-token="<%= f.share_token %>" onclick="scPlay('<%= f.share_token %>')">
-                  <button class="track-play-inline" tabindex="-1">
-                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                  </button>
-                  <span class="track-num"><%= idx + 1 %></span>
-                  <div class="track-info">
-                    <span class="track-name"><%= f.title_tag || f.original_name.replace(/\.[^.]+$/, '') %></span>
-                    <% if (f.artist) { %><span class="track-artist text-muted text-sm"><%= f.artist %></span><% } %>
-                    <span class="track-meta">
-                      <% if (f.duration) { %><%= Math.floor(f.duration / 60) %>:<%= String(Math.floor(f.duration % 60)).padStart(2,'0') %> · <% } %>
-                      <%= (f.size / 1048576).toFixed(1) %> Mo
-                    </span>
-                  </div>
-                  <% if (playlist.allow_download) { %>
-                    <a href="/download/<%= f.share_token %>" class="copy-btn" style="flex-shrink:0;" title="Télécharger" onclick="event.stopPropagation();">↓</a>
-                  <% } %>
-                </li>
-              <% }) %>
-            </ul>
+            <div class="sl-pl-card sl-pl-card--unavailable" data-search="<%= d.name + ' ' + d.type %>">
+              <span class="sl-pl-card-meta"><%= d.type %></span>
+              <span class="sl-pl-card-name"><%= d.name %></span>
+              <span class="text-muted text-sm">Lien d’écoute indisponible</span>
+            </div>
           <% } %>
-        </div>
-      <% }) %>
-    </div>
-
-  </div>
-
-  <%- include('partials/audio-player') %>
-
+        <% }) %>
+      </nav>
+      <p id="destinationEmpty" class="text-muted" hidden>Aucun lien ne correspond à votre recherche.</p>
+    <% } else { %>
+      <div class="card"><p class="text-muted">Aucune playlist ni page d’enregistrement disponible pour le moment.</p></div>
+    <% } %>
+  </main>
   <script>
-    const playlists = <%- JSON.stringify(playlists.map(p => ({ id: p.id, name: p.name, fileCount: p.files.length, examMode: !!p.exam_mode }))) %>;
-
-    scRegisterTracks(<%- JSON.stringify(playlists.flatMap(p => p.files.map(f => ({
-      token: f.share_token,
-      name: (f.title_tag || f.original_name).replace(/\.[^.]+$/, ''),
-      playlistName: p.name,
-      codec: f.codec || 'none',
-      ...(f.artist ? { artist: f.artist } : {})
-    })))) %>);
-
-    const viewSelect = document.getElementById('viewSelect');
-    const viewTrack  = document.getElementById('viewTrack');
-    const slBackBtn  = document.getElementById('slBackBtn');
-    const slTitle    = document.getElementById('slPlaylistTitle');
-    const slMeta     = document.getElementById('slPlaylistMeta');
-
-    function showSelectView() {
-      viewTrack.style.display  = 'none';
-      viewSelect.style.display = '';
-      history.replaceState(null, '', location.pathname);
-    }
-
-    function showPlaylistView(playlistId) {
-      const pl = playlists.find(p => p.id === playlistId);
-      if (!pl) return;
-
-      // Mode examen selon la playlist
-      if (typeof scSetExamMode === 'function') scSetExamMode(pl.examMode);
-
-      // Mise à jour du titre
-      slTitle.textContent = pl.name;
-      slMeta.textContent  = pl.fileCount + ' piste' + (pl.fileCount !== 1 ? 's' : '');
-
-      // Afficher le bon panel
-      document.querySelectorAll('.sl-track-panel').forEach(panel => {
-        panel.style.display = Number(panel.dataset.panelId) === playlistId ? '' : 'none';
+    const search = document.getElementById('destinationSearch');
+    const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (search) search.addEventListener('input', () => {
+      let count = 0;
+      document.querySelectorAll('[data-search]').forEach(card => {
+        card.hidden = !normalize(card.dataset.search).includes(normalize(search.value.trim()));
+        if (!card.hidden) count++;
       });
-
-      viewSelect.style.display = 'none';
-      viewTrack.style.display  = '';
-      history.replaceState(null, '', location.pathname + '?playlist=' + playlistId);
-    }
-
-    // Clic sur une carte de playlist
-    document.querySelectorAll('.sl-pl-card').forEach(card => {
-      card.addEventListener('click', () => showPlaylistView(Number(card.dataset.playlistId)));
+      document.getElementById('destinationCount').textContent = count + ' résultat(s)';
+      document.getElementById('destinationEmpty').hidden = count > 0;
     });
-
-    // Bouton retour
-    if (slBackBtn) slBackBtn.addEventListener('click', showSelectView);
-
-    // Démarrage : si ?playlist=ID dans l'URL ou une seule playlist, ouvrir directement
-    const urlPlaylist = new URLSearchParams(location.search).get('playlist');
-    if (urlPlaylist) {
-      showPlaylistView(Number(urlPlaylist));
-    } else if (playlists.length === 1) {
-      showPlaylistView(playlists[0].id);
-    }
   </script>
 </body>
 </html>

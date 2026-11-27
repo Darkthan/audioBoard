@@ -120,6 +120,12 @@ db.exec(`
     playlist_id INTEGER REFERENCES playlists(id) ON DELETE SET NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS shared_link_records (
+    shared_link_id INTEGER NOT NULL REFERENCES shared_links(id) ON DELETE CASCADE,
+    record_link_id INTEGER NOT NULL REFERENCES record_links(id) ON DELETE CASCADE,
+    PRIMARY KEY (shared_link_id, record_link_id)
+  );
 `);
 
 db.exec(`
@@ -207,6 +213,19 @@ db.exec(`
   )`);
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_shared_link_playlists_playlist ON shared_link_playlists(playlist_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_shared_link_records_record ON shared_link_records(record_link_id)');
+
+  // Existing menus already exposed these playlists; give them their own public page once.
+  // Keep later revocations effective by never repeating this backfill.
+  if (!db.prepare("SELECT 1 FROM settings WHERE key = 'shared_menu_navigation_migrated'").get()) {
+    db.transaction(() => {
+      const missing = db.prepare(`SELECT DISTINCT p.id FROM playlists p
+        JOIN shared_link_playlists slp ON slp.playlist_id = p.id WHERE p.share_token IS NULL`).all();
+      const update = db.prepare('UPDATE playlists SET share_token = ? WHERE id = ?');
+      missing.forEach(p => update.run(uuidv4(), p.id));
+      db.prepare("INSERT INTO settings (key, value) VALUES ('shared_menu_navigation_migrated', '1')").run();
+    })();
+  }
 
   // Magic tokens — request_id + consumed pour le mode cross-device
   const mtCols = db.prepare('PRAGMA table_info(magic_tokens)').all().map(c => c.name);
@@ -293,6 +312,19 @@ const stmt = {
   `),
   deleteSharedLink:        db.prepare('DELETE FROM shared_links WHERE id = ?'),
   deleteSharedLinkPlaylists: db.prepare('DELETE FROM shared_link_playlists WHERE shared_link_id = ?'),
+  getAllRecordLinks: db.prepare(`
+    SELECT r.*, u.username as owner_name, p.name as playlist_name
+    FROM record_links r JOIN users u ON u.id = r.owner_id
+    JOIN playlists p ON p.id = r.playlist_id ORDER BY r.name
+  `),
+  getSharedLinkRecords: db.prepare(`
+    SELECT r.id, r.name, r.token FROM shared_link_records sr
+    JOIN record_links r ON r.id = sr.record_link_id
+    JOIN playlists p ON p.id = r.playlist_id
+    WHERE sr.shared_link_id = ? ORDER BY r.name
+  `),
+  insertSharedLinkRecord: db.prepare('INSERT INTO shared_link_records (shared_link_id, record_link_id) VALUES (?, ?)'),
+  deleteSharedLinkRecords: db.prepare('DELETE FROM shared_link_records WHERE shared_link_id = ?'),
 
   insertInviteLink:    db.prepare('INSERT INTO invite_links (token, name, message, max_uses, created_by) VALUES (?, ?, ?, ?, ?)'),
   getInviteLinkByToken:db.prepare('SELECT * FROM invite_links WHERE token = ?'),
@@ -526,12 +558,21 @@ const reorderPlaylist = db.transaction((playlistId, orderedIds) => {
   orderedIds.forEach((id, i) => stmt.updateFilePosition.run(i, id, playlistId));
 });
 
-const createSharedLinkWithPlaylists = db.transaction((name, playlistIds) => {
+function saveSharedLinkSelection(linkId, playlistIds, recordIds) {
+  stmt.deleteSharedLinkPlaylists.run(linkId);
+  stmt.deleteSharedLinkRecords.run(linkId);
+  for (const playlistId of playlistIds) {
+    const playlist = stmt.getPlaylistById.get(playlistId);
+    if (!playlist.share_token) stmt.setPlaylistShareToken.run(uuidv4(), playlistId);
+    stmt.insertSharedLinkPlaylist.run(linkId, playlistId);
+  }
+  recordIds.forEach(id => stmt.insertSharedLinkRecord.run(linkId, id));
+}
+const updateSharedLinkSelection = db.transaction(saveSharedLinkSelection);
+const createSharedLinkWithPlaylists = db.transaction((name, playlistIds, recordIds) => {
   const token = uuidv4();
   const result = stmt.insertSharedLink.run(name, token);
-  for (const playlistId of playlistIds) {
-    stmt.insertSharedLinkPlaylist.run(result.lastInsertRowid, playlistId);
-  }
+  saveSharedLinkSelection(result.lastInsertRowid, playlistIds, recordIds);
   return { id: result.lastInsertRowid, token };
 });
 
@@ -1283,30 +1324,29 @@ app.get('/l/:token', (req, res) => {
   const sharedLink = stmt.getSharedLinkByToken.get(req.params.token);
   if (!sharedLink) return res.status(404).render('error', { message:'Lien introuvable', user:null });
 
-  const playlists = stmt.getSharedLinkPlaylists.all(sharedLink.id).map(playlist => ({
-    ...playlist,
-    files: stmt.getFilesPublicPlaylistFull.all(playlist.id).filter(f => !isExpired(f)),
-  }));
-
-  if (!playlists.length) {
-    return res.status(404).render('error', { message:'Ce lien ne contient plus aucune playlist (elles ont peut-être été supprimées).', user:null });
-  }
-
-  const selectedPlaylistId = req.query.playlist ? parseInt(req.query.playlist, 10) : playlists[0].id;
-  const selectedPlaylist = playlists.find(p => p.id === selectedPlaylistId) || playlists[0];
-  res.render('shared-link', { sharedLink, playlists, selectedPlaylistId, examMode: !!selectedPlaylist.exam_mode });
+  const destinations = [
+    ...stmt.getSharedLinkPlaylists.all(sharedLink.id).map(p => ({
+      name: p.name, type: 'Écoute', href: p.share_token ? '/playlist/' + p.share_token : null,
+    })),
+    ...stmt.getSharedLinkRecords.all(sharedLink.id).map(r => ({
+      name: r.name, type: 'Enregistrement', href: '/record/' + r.token,
+    })),
+  ].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  res.render('shared-link', { sharedLink, destinations });
 });
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 app.get('/admin', requireAdmin, (req, res) => {
   const users = stmt.getAllUsersFull.all();
   const playlists = stmt.getAllPlaylists.all();
+  const recordLinks = stmt.getAllRecordLinks.all();
   const sharedLinks = stmt.getAllSharedLinks.all().map(link => {
     const playlistsForLink = stmt.getSharedLinkPlaylists.all(link.id);
     return {
       ...link,
       playlists: playlistsForLink,
       playlist_ids: playlistsForLink.map(p => p.id),
+      records: stmt.getSharedLinkRecords.all(link.id),
     };
   });
   const settings = {};
@@ -1320,7 +1360,7 @@ app.get('/admin', requireAdmin, (req, res) => {
   }));
 
   res.render('admin', {
-    users: usersWithStorage, playlists, sharedLinks, settings, inviteLinks,
+    users: usersWithStorage, playlists, recordLinks, sharedLinks, settings, inviteLinks,
     stats: {
       totalFiles: stmt.countFiles.get().c,
       totalSize:  stmt.sumFileSize.get().s,
@@ -1334,20 +1374,26 @@ app.get('/admin', requireAdmin, (req, res) => {
   });
 });
 
+function sharedLinkSelection(body) {
+  const ids = value => [...new Set((Array.isArray(value) ? value : [value])
+    .map(id => /^\d+$/.test(String(id)) ? Number(id) : NaN).filter(Number.isSafeInteger))];
+  const playlistIds = ids(body.playlist_ids);
+  const recordIds = ids(body.record_ids);
+  if (!playlistIds.length && !recordIds.length) return { error: 'Sélectionnez au moins une playlist ou un lien d’enregistrement' };
+  const validPlaylists = new Set(stmt.getAllPlaylists.all().map(p => p.id));
+  const validRecords = new Set(stmt.getAllRecordLinks.all().map(r => r.id));
+  if (playlistIds.some(id => !validPlaylists.has(id)) || recordIds.some(id => !validRecords.has(id))) {
+    return { error: 'Une sélection est invalide' };
+  }
+  return { playlistIds, recordIds };
+}
+
 app.post('/admin/shared-links', requireAdmin, (req, res) => {
   const name = (req.body.name || '').trim();
-  const raw = Array.isArray(req.body.playlist_ids) ? req.body.playlist_ids : [req.body.playlist_ids];
-  const playlistIds = [...new Set(raw.map(id => parseInt(id, 10)).filter(Number.isInteger))];
-
   if (!name) return res.redirect('/admin?error=Nom du lien requis');
-  if (!playlistIds.length) return res.redirect('/admin?error=Selectionnez au moins une playlist');
-
-  const validPlaylistIds = new Set(stmt.getAllPlaylists.all().map(p => p.id));
-  if (playlistIds.some(id => !validPlaylistIds.has(id))) {
-    return res.redirect('/admin?error=Une playlist selectionnee est invalide');
-  }
-
-  createSharedLinkWithPlaylists(name, playlistIds);
+  const selection = sharedLinkSelection(req.body);
+  if (selection.error) return res.redirect('/admin?error=' + encodeURIComponent(selection.error));
+  createSharedLinkWithPlaylists(name, selection.playlistIds, selection.recordIds);
   res.redirect('/admin');
 });
 
@@ -1361,18 +1407,9 @@ app.post('/admin/shared-links/:id/update', requireAdmin, (req, res) => {
   const link = stmt.getSharedLinkById.get(id);
   if (!link) return res.redirect('/admin?error=Lien introuvable');
 
-  const raw = Array.isArray(req.body.playlist_ids) ? req.body.playlist_ids : [req.body.playlist_ids];
-  const playlistIds = [...new Set(raw.map(val => parseInt(val, 10)).filter(Number.isInteger))];
-
-  if (!playlistIds.length) return res.redirect('/admin?error=Selectionnez au moins une playlist');
-
-  const validPlaylistIds = new Set(stmt.getAllPlaylists.all().map(p => p.id));
-  if (playlistIds.some(id => !validPlaylistIds.has(id))) {
-    return res.redirect('/admin?error=Une playlist selectionnee est invalide');
-  }
-
-  stmt.deleteSharedLinkPlaylists.run(link.id);
-  playlistIds.forEach(pid => stmt.insertSharedLinkPlaylist.run(link.id, pid));
+  const selection = sharedLinkSelection(req.body);
+  if (selection.error) return res.redirect('/admin?error=' + encodeURIComponent(selection.error));
+  updateSharedLinkSelection(link.id, selection.playlistIds, selection.recordIds);
   res.redirect('/admin');
 });
 

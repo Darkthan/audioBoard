@@ -1,0 +1,31 @@
+<div class="shared-selector">
+  <label>Rechercher des playlists ou des liens d’enregistrement
+    <input type="search" class="form-control shared-playlist-search" placeholder="Nom, propriétaire, type…">
+  </label>
+  <div class="shared-selector-toolbar">
+    <span class="text-muted text-sm selection-count" role="status"></span>
+    <button type="button" class="copy-btn" data-select-visible>Sélectionner les résultats</button>
+    <button type="button" class="copy-btn" data-clear-selection>Tout désélectionner</button>
+  </div>
+  <div class="playlist-checkboxes multi-select">
+    <% playlists.forEach(p => { %>
+      <label class="playlist-checkbox" data-name="<%= p.name + ' ' + p.owner_name + ' écoute' %>">
+        <input type="checkbox" name="playlist_ids" value="<%= p.id %>" <%= selectedPlaylists.includes(p.id) ? 'checked' : '' %>>
+        <span class="playlist-checkbox-text">
+          <span class="checkbox-title"><%= p.name %></span>
+          <span class="checkbox-meta">Écoute · <%= p.owner_name %></span>
+        </span>
+      </label>
+    <% }) %>
+    <% recordLinks.forEach(r => { %>
+      <label class="playlist-checkbox" data-name="<%= r.name + ' ' + r.owner_name + ' ' + r.playlist_name + ' enregistrement' %>">
+        <input type="checkbox" name="record_ids" value="<%= r.id %>" <%= selectedRecords.includes(r.id) ? 'checked' : '' %>>
+        <span class="playlist-checkbox-text">
+          <span class="checkbox-title"><%= r.name %></span>
+          <span class="checkbox-meta">Enregistrement · <%= r.owner_name %> · <%= r.playlist_name %></span>
+        </span>
+      </label>
+    <% }) %>
+  </div>
+  <p class="text-muted text-sm selection-empty" hidden>Aucun résultat.</p>
+</div>

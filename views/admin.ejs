@@ -274,24 +274,8 @@
             <label for="shared_link_name">Nom du lien</label>
             <input type="text" id="shared_link_name" name="name" class="form-control" placeholder="Ex. Médiathèque clients" required>
           </div>
-          <div class="form-group">
-            <label for="shared_link_filter">Filtrer les playlists</label>
-            <input type="text" id="shared_link_filter" class="form-control shared-playlist-filter" placeholder="Rechercher par nom">
-          </div>
-          <div class="form-group">
-            <label class="text-muted text-sm">Sélection des playlists</label>
-            <div class="playlist-checkboxes multi-select">
-              <% playlists.forEach(p => { %>
-                <label class="playlist-checkbox" data-name="<%= p.name.toLowerCase() %>">
-                  <input type="checkbox" name="playlist_ids" value="<%= p.id %>">
-                  <div class="playlist-checkbox-text">
-                    <span class="checkbox-title"><%= p.name %></span>
-                    <span class="checkbox-meta">Propriétaire · <%= p.owner_name %> · créé le <%= new Date(p.created_at).toLocaleDateString('fr-FR') %></span>
-                  </div>
-                </label>
-              <% }) %>
-            </div>
-          </div>
+          <%- include('partials/shared-link-selector', { selectedPlaylists: [], selectedRecords: [] }) %>
+          <p class="text-muted text-sm">Les playlists choisies disposent d’un lien public d’écoute. Les liens d’enregistrement ouvrent leur formulaire habituel.</p>
           <button type="submit" class="btn btn-primary btn-sm create-link-btn">Créer le lien</button>
         </form>
 
@@ -304,30 +288,20 @@
                 <div>
                   <div class="card-title" style="margin-bottom:.25rem;"><%= link.name %></div>
                   <p class="text-muted text-sm" style="margin:0;">
-                    <%= link.playlists.length %> playlist<%= link.playlists.length !== 1 ? 's' : '' %> · créé le <%= new Date(link.created_at).toLocaleDateString('fr-FR') %>
+                    <%= link.playlists.length %> playlist(s) · <%= link.records.length %> enregistrement(s) · créé le <%= new Date(link.created_at).toLocaleDateString('fr-FR') %>
                   </p>
                   <p class="text-muted text-sm link-token">/l/<%= link.token %></p>
                 </div>
                 <div class="shared-link-actions">
                   <button type="button" class="copy-btn" onclick="copySharedLink('<%= link.token %>')">Copier</button>
-                  <button type="button" class="icon-btn edit-link-btn" data-target="link-<%= link.id %>">✎</button>
+                  <a class="copy-btn" href="/l/<%= link.token %>" target="_blank" rel="noopener">Ouvrir le menu</a>
+                  <button type="button" class="copy-btn edit-link-btn" aria-expanded="false" aria-controls="link-<%= link.id %>">Modifier la sélection</button>
                   <form method="POST" action="/admin/shared-links/<%= link.id %>/delete" onsubmit="return confirm('Supprimer ce lien permanent ?')">
                     <button type="submit" class="btn btn-danger btn-sm">Suppr.</button>
                   </form>
                 </div>
                 <form method="POST" action="/admin/shared-links/<%= link.id %>/update" class="shared-link-form" id="link-<%= link.id %>">
-                  <input type="text" placeholder="Rechercher des playlists" class="form-control shared-playlist-search" aria-label="Recherche playlists">
-                  <div class="playlist-checkboxes multi-select">
-                    <% playlists.forEach(p => { %>
-                      <label class="playlist-checkbox" data-name="<%= p.name.toLowerCase() %>">
-                        <input type="checkbox" name="playlist_ids" value="<%= p.id %>" <%= link.playlist_ids.includes(p.id) ? 'checked' : '' %>>
-                        <div class="playlist-checkbox-text">
-                          <span class="checkbox-title"><%= p.name %></span>
-                          <span class="checkbox-meta">Propriétaire · <%= p.owner_name %> · créé le <%= new Date(p.created_at).toLocaleDateString('fr-FR') %></span>
-                        </div>
-                      </label>
-                    <% }) %>
-                  </div>
+                  <%- include('partials/shared-link-selector', { selectedPlaylists: link.playlist_ids, selectedRecords: link.records.map(r => r.id) }) %>
                   <button type="submit" class="btn btn-primary btn-sm">Sauvegarder</button>
                 </form>
               </div>
@@ -494,19 +468,33 @@ Vous trouverez ici vos playlists partagées, organisées et accessibles à tout 
     function copyInviteLink(token) {
       navigator.clipboard.writeText(location.origin + '/invite/' + token).then(() => alert('Lien d\'invitation copié !'));
     }
-    const filterInput = document.querySelector('.shared-playlist-filter');
-    const playlistLabels = document.querySelectorAll('.playlist-checkbox');
-    function applyPlaylistFilter(term) {
-      playlistLabels.forEach(label => {
-        const matches = !term || label.dataset.name.includes(term);
-        label.style.display = matches ? '' : 'none';
+    const normalizeSelection = value => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    document.querySelectorAll('.shared-selector').forEach(selector => {
+      const search = selector.querySelector('input[type="search"]');
+      const labels = [...selector.querySelectorAll('.playlist-checkbox')];
+      const update = () => {
+        let visible = 0;
+        labels.forEach(label => {
+          label.hidden = !normalizeSelection(label.dataset.name).includes(normalizeSelection(search.value.trim()));
+          if (!label.hidden) visible++;
+        });
+        const count = labels.filter(label => label.querySelector('input').checked).length;
+        selector.querySelector('.selection-count').textContent = count + ' sélectionné(s) · ' + visible + ' résultat(s)';
+        selector.querySelector('.selection-empty').hidden = visible > 0;
+        selector.closest('form').querySelector('button[type="submit"]').disabled = count === 0;
+      };
+      search.addEventListener('input', update);
+      selector.addEventListener('change', update);
+      selector.querySelector('[data-select-visible]').addEventListener('click', () => {
+        labels.filter(label => !label.hidden).forEach(label => { label.querySelector('input').checked = true; });
+        update();
       });
-    }
-    if (filterInput) {
-      filterInput.addEventListener('input', () => {
-        applyPlaylistFilter(filterInput.value.trim().toLowerCase());
+      selector.querySelector('[data-clear-selection]').addEventListener('click', () => {
+        labels.forEach(label => { label.querySelector('input').checked = false; });
+        update();
       });
-    }
+      update();
+    });
     document.querySelectorAll('.edit-link-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const item = btn.closest('.shared-link-list-item');
@@ -514,6 +502,7 @@ Vous trouverez ici vos playlists partagées, organisées et accessibles à tout 
         const form = item.querySelector('.shared-link-form');
         if (!form) return;
         item.classList.toggle('shared-link-card--editing');
+        btn.setAttribute('aria-expanded', String(item.classList.contains('shared-link-card--editing')));
         if (item.classList.contains('shared-link-card--editing')) {
           form.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
