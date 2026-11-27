@@ -248,6 +248,11 @@
                   <td>
                     <button type="button" class="icon-btn user-edit-btn" data-user-edit aria-label="Modifier l'utilisateur">✎</button>
                     <button type="submit" class="btn btn-secondary btn-sm user-save-btn" form="user-update-<%= u.id %>" hidden>Enregistrer</button>
+                    <% if (u.role !== 'admin') { %>
+                      <form method="POST" action="/admin/users/<%= u.id %>/impersonate" style="display:inline;">
+                        <button type="submit" class="btn btn-secondary btn-sm" title="Accéder à ce compte">Accéder</button>
+                      </form>
+                    <% } %>
                     <% if (u.id !== user.id) { %>
                       <form method="POST" action="/admin/users/<%= u.id %>/delete" style="display:inline;"
                             onsubmit="return confirm('Supprimer cet utilisateur et toutes ses playlists ?')">

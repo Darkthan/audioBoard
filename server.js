@@ -616,6 +616,7 @@ function requireAdmin(req, res, next) {
 }
 app.use((req, res, next) => {
   res.locals.user = req.session.user || null;
+  res.locals.impersonatedBy = req.session.impersonatedBy || null;
   res.locals.webrtcEnabled = getSetting('webrtc_enabled') !== '0';
   res.locals.passwordlessEnabled = getSetting('passwordless_enabled') === '1';
   res.locals.webauthnEnabled = getSetting('webauthn_enabled') === '1';
@@ -1404,8 +1405,28 @@ app.post('/admin/users/:id/update', requireAdmin, (req, res) => {
   res.redirect('/admin');
 });
 
+// ── Impersonation (admin → uploader uniquement) ───────────────────────────────
+app.post('/admin/users/:id/impersonate', requireAdmin, (req, res) => {
+  const target = stmt.getUserById.get(parseInt(req.params.id, 10));
+  if (!target) return res.redirect('/admin?error=Utilisateur introuvable');
+  if (target.role === ROLES.ADMIN) return res.status(403).render('error', { message:'Impossible d\'accéder à un compte administrateur', user: req.session.user });
+  req.session.impersonatedBy = { id: req.session.user.id, username: req.session.user.username, role: req.session.user.role };
+  req.session.user = { id: target.id, username: target.username, role: target.role };
+  res.redirect('/');
+});
+
+app.post('/admin/stop-impersonating', (req, res) => {
+  const admin = req.session.impersonatedBy;
+  if (!admin) return res.redirect('/');
+  const real = stmt.getUserById.get(admin.id);
+  delete req.session.impersonatedBy;
+  if (!real || real.role !== ROLES.ADMIN) { req.session.destroy(); return res.redirect('/login'); }
+  req.session.user = { id: real.id, username: real.username, role: real.role };
+  res.redirect('/admin');
+});
+
 // ── Invite links ──────────────────────────────────────────────────────────────
-app.post('/admin/invite-links', requireAdmin, (req, res) => {
+app.post('/admin/invite-links',requireAdmin, (req, res) => {
   const name    = (req.body.name    || '').trim();
   const message = (req.body.message || '').trim();
   const maxUses = Math.max(1, parseInt(req.body.max_uses, 10) || 10);
