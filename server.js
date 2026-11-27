@@ -1286,10 +1286,10 @@ app.get('/l/:token', (req, res) => {
   const playlists = stmt.getSharedLinkPlaylists.all(sharedLink.id).map(playlist => ({
     ...playlist,
     files: stmt.getFilesPublicPlaylistFull.all(playlist.id).filter(f => !isExpired(f)),
-  })).filter(playlist => playlist.files.length > 0 || playlist.file_count > 0);
+  }));
 
   if (!playlists.length) {
-    return res.status(404).render('error', { message:'Aucune playlist disponible pour ce lien', user:null });
+    return res.status(404).render('error', { message:'Ce lien ne contient plus aucune playlist (elles ont peut-être été supprimées).', user:null });
   }
 
   const selectedPlaylistId = req.query.playlist ? parseInt(req.query.playlist, 10) : playlists[0].id;
