@@ -1,7 +1,7 @@
 'use strict';
 
 // Incrémenter CACHE_STATIC quand CSS/JS changent pour forcer le remplacement
-const CACHE_STATIC = 'ab-static-v2';
+const CACHE_STATIC = 'ab-static-v3';
 const CACHE_PAGES  = 'ab-pages-v1';   // pages HTML visitées
 const CACHE_AUDIO  = 'ab-audio-v1';   // flux audio lus
 const CACHE_ASSETS = 'ab-assets-v1';  // covers + waveforms API

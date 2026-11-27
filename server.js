@@ -7,6 +7,7 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
+const { createHash } = require('crypto');
 const { createServer } = require('http');
 const { WebSocketServer } = require('ws');
 const nodemailer = require('nodemailer');
@@ -612,6 +613,15 @@ const uploadRecord = multer({
 app.set('trust proxy', 1);
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+// A new stylesheet gets a new URL, including for clients controlled by an older
+// cache-first service worker or behind a reverse proxy that caches CSS.
+const stylesheetPath = path.join(__dirname, 'public', 'css', 'style.css');
+const stylesheetVersion = createHash('sha256').update(fs.readFileSync(stylesheetPath)).digest('hex').slice(0, 16);
+app.locals.stylesheetUrl = `/css/style.${stylesheetVersion}.css`;
+app.get('/css/style.:version.css', (req, res) => {
+  if (req.params.version !== stylesheetVersion) return res.status(404).end();
+  res.sendFile(stylesheetPath, { maxAge: '1y', immutable: true });
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());

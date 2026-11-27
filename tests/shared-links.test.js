@@ -71,6 +71,31 @@ test('shared menus navigate to listening and recording pages, with independent a
     assert.equal(response.status(), 200);
     await page.goto(base + '/l/' + link.token);
     assert.equal(await page.locator('a.sl-pl-card').count(), 2);
+    // Returning visitors may have stale unversioned CSS in a cache-first worker.
+    // Keep that stale response in place and verify the page uses fresh hashed CSS.
+    const stylesheet = await page.locator('link[rel=stylesheet]').getAttribute('href');
+    assert.match(stylesheet, /^\/css\/style\.[a-f0-9]{16}\.css$/);
+    const cssResponse = await page.request.get(base + stylesheet);
+    assert.equal(cssResponse.status(), 200);
+    assert.equal(await cssResponse.text(), fs.readFileSync(path.join(__dirname, '../public/css/style.css'), 'utf8'));
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.ready;
+      if (!navigator.serviceWorker.controller) {
+        await new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }));
+      }
+      const cache = await caches.open('ab-static-v2');
+      // Also remove the new worker's unversioned precache to simulate the older worker.
+      const current = await caches.open('ab-static-v3');
+      await current.delete('/css/style.css');
+      await cache.put('/css/style.css', new Response('/* outdated CSS */ .sl-pl-card { display: none; }', {
+        headers: { 'Content-Type': 'text/css' },
+      }));
+    });
+    assert.match(await page.evaluate(() => fetch('/css/style.css').then(r => r.text())), /outdated CSS/);
+    await page.reload();
+    assert.equal(await page.locator('a.sl-pl-card:visible').count(), 2);
+    assert.equal(await page.locator('.sl-brand > svg').evaluate(icon => Math.round(icon.getBoundingClientRect().width)), 26);
+    assert.equal(await page.locator('a.sl-pl-card').first().evaluate(card => getComputedStyle(card).display), 'flex');
     if (process.env.AUDIOBOARD_SCREENSHOT_DIR) {
       const screenshots = process.env.AUDIOBOARD_SCREENSHOT_DIR;
       fs.mkdirSync(screenshots, { recursive: true });

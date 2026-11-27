@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title><%= sharedLink.name %></title>
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="<%= stylesheetUrl %>">
 </head>
 <body>
   <main class="container sl-menu">
@@ -49,6 +49,11 @@
     <% } %>
   </main>
   <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
+      });
+    }
     const search = document.getElementById('destinationSearch');
     const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     if (search) search.addEventListener('input', () => {
