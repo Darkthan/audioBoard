@@ -443,8 +443,17 @@ Vous trouverez ici vos playlists partagées, organisées et accessibles à tout 
               <tbody>
                 <% playlists.forEach(p => { %>
                   <tr>
-                    <td><%= p.name %></td>
-                    <td class="text-muted"><%= p.owner_name %></td>
+                    <td><a href="/playlists/<%= p.id %>" style="color:var(--primary);" title="Ouvrir la playlist"><%= p.name %></a></td>
+                    <td>
+                      <form method="POST" action="/admin/playlists/<%= p.id %>/owner" style="display:flex; gap:.35rem; align-items:center;">
+                        <select name="owner_id" class="form-control" style="font-size:.8rem; padding:.2rem .5rem; height:auto; min-width:130px;">
+                          <% users.forEach(u => { %>
+                            <option value="<%= u.id %>" <%= u.id === p.owner_id ? 'selected' : '' %>><%= u.username %></option>
+                          <% }) %>
+                        </select>
+                        <button type="submit" class="btn btn-secondary btn-sm">Changer</button>
+                      </form>
+                    </td>
                     <td class="text-muted"><%= p.file_count %></td>
                     <td class="text-muted"><%= new Date(p.created_at).toLocaleDateString('fr-FR') %></td>
                     <td>

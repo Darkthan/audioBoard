@@ -1730,6 +1730,20 @@ app.post('/admin/playlists/:id/delete', requireAdmin, (req, res) => {
   res.redirect('/admin');
 });
 
+app.post('/admin/playlists/:id/owner', requireAdmin, (req, res) => {
+  const playlist = stmt.getPlaylistById.get(parseInt(req.params.id, 10));
+  if (!playlist) return res.redirect('/admin?error=Playlist introuvable');
+  const newOwner = stmt.getUserById.get(parseInt(req.body.owner_id, 10));
+  if (!newOwner) return res.redirect('/admin?error=Utilisateur introuvable');
+  if (newOwner.id === playlist.owner_id) return res.redirect('/admin');
+  try {
+    db.prepare('UPDATE playlists SET owner_id=? WHERE id=?').run(newOwner.id, playlist.id);
+  } catch {
+    return res.redirect('/admin?error=' + encodeURIComponent('Ce propriétaire a déjà une playlist portant ce nom'));
+  }
+  res.redirect('/admin');
+});
+
 app.post('/admin/settings', requireAdmin, (req, res) => {
   const { compression_codec, compression_bitrate, retention_days, empty_playlist_retention_days,
           webrtc_enabled, passwordless_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, smtp_from,
